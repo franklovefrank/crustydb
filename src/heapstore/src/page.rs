@@ -2,6 +2,78 @@ use common::ids::{PageId, SlotId};
 use common::PAGE_SIZE;
 use std::convert::TryInto;
 use std::mem;
+use serde::{Serialize, Deserialize};
+use ::slice_of_array::prelude::*;
+
+// make separate struct for entries, serialize together in header
+// to get length of header, deserialize headerinfo, use count to determine array size 
+
+
+#[derive(Serialize, Deserialize)]
+pub struct Entry {
+    pub entry: [u8;2]
+    //just slot id right now 
+}
+
+impl Entry{
+    pub fn new (slot_id:SlotId) -> Self {
+            let bytes:[u8; 2] = slot_id.to_be_bytes();
+            Entry { entry: bytes}
+    }
+}
+
+pub struct Entries {
+    pub entries: Vec<u8>
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct HeaderInfo {
+    pub page_id: PageId, //2 bytes //u16
+    pub count: u16, //2 byte
+    pub entries: Vec<u8>
+}
+
+impl HeaderInfo{
+
+    pub fn new(page_id: PageId) -> Self{
+        let vec = Vec::new();
+        HeaderInfo {page_id: page_id, count: 0, entries: vec}
+    }
+
+    pub fn add_entry(mut self, slot_id: SlotId){
+        self.count = &self.count + 1;
+        let new_entry = Entry::new(slot_id);
+        self.entries.append(&mut new_entry.entry.to_vec())
+  
+    }
+
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Header {
+    pub header: Vec<u8>
+}
+
+impl Header {
+
+    pub fn new(page_id: PageId) -> Self {
+        let info : HeaderInfo = HeaderInfo::new(page_id);
+        Header { header: Header::serialize_header(info) }
+    }
+
+    pub fn serialize_header(mut info: HeaderInfo) ->  Vec<u8> {
+        let mut temp: Vec<u8> = (&info.page_id.to_be_bytes()).to_vec();
+        let mut count: Vec<u8> = (&info.count.to_be_bytes()).to_vec();
+        temp.append(& mut count) 
+        if info.count > 0 {
+            temp.append(&mut info.entries);
+        }
+        return temp
+    }
+
+    pub fn deserialize_header( )
+}
+
 
 
 /// The struct for a page. Note this can hold more elements/meta data when created,
@@ -20,14 +92,27 @@ pub(crate) struct Page {
 impl Page {
     /// Create a new page
     pub fn new(page_id: PageId) -> Self {
-        panic!("TODO milestone pg");
+        let header : Header = Header::new(page_id);
+        let mut data : Vec<u8> = vec![0; PAGE_SIZE -4];
+        let mut vec: Vec<u8> = header.header; 
+        vec.append(& mut data);
+        Page { data: *vec.as_array()}
     }
+
+
 
     /// Return the page id for a page
     pub fn get_page_id(&self) -> PageId {
-        panic!("TODO milestone pg");
+        let mut dst = [0,0];
+        dst.clone_from_slice(&self.data[..1]);
+        let ret= u16::from_be_bytes(dst);
+        return ret;
     }
 
+
+// Because the slices have to be the same length,
+// we slice the source slice from four elements
+// to two. It will panic if we don't do this.
 
     /// Attempts to add a new value to this page if there is space available.
     /// Returns Some(SlotId) if it was inserted or None if there was not enough space.
@@ -72,6 +157,7 @@ impl Page {
     /// HINT: To convert a vec of bytes using little endian, use
     /// to_le_bytes().to_vec()
     pub fn get_bytes(&self) -> Vec<u8> {
+
         panic!("TODO milestone pg");
     }
 
@@ -80,7 +166,11 @@ impl Page {
     /// Will be used by tests. Optional for you to use in your code
     #[allow(dead_code)]
     pub(crate) fn get_header_size(&self) -> usize {
-        panic!("TODO milestone pg");
+        let mut dst = [0,0];
+        dst.clone_from_slice(&self.data[2..3]);
+        let count= u16::from_be_bytes(dst);
+        return ((count * 2) + 4).into();
+
     }
 
     /// A utility function to determine the largest block of free space in the page.
