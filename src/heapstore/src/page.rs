@@ -6,12 +6,19 @@ use serde::{Serialize, Deserialize};
 use ::slice_of_array::prelude::*;
 
 
+// inserting values: need to update so min of slot_id in entries s.t. (open == true ) && (length > val.length) 
+// if false, then new slot 
+//delete values: change bool, write over data? 
+// redo serialize functions for entry struct, make sure u8 is sufficient for length 
+
+
 #[derive(Serialize, Deserialize)]
 pub struct Entry {
     pub slot_id: SlotId, // 2 bytes
     pub address: u16,  // 2 bytes
-    pub length: u16 // 2 bytes
-    //pub empty: bool 
+    pub length: u8, // 1 byte 
+    pub open: bool; // 1 byte
+    //need to reserialize
 }
 
 pub struct Entries {
@@ -87,13 +94,11 @@ impl Page {
 
 
     pub fn serialize_entry(entry: &Entry) ->  Vec<u8> {
-        println!("in serialize entry line 27 slot_id {} address {} length {}", entry.slot_id, entry.address, entry.length);
         let mut temp: Vec<u8> = (&entry.slot_id.to_be_bytes()).to_vec();
         let mut addr: Vec<u8> = (&entry.address.to_be_bytes()).to_vec();
         let mut length: Vec<u8> = (&entry.length.to_be_bytes()).to_vec();
         temp.append(& mut addr);
         temp.append(& mut length);
-        println!("in serialize entry byte array is {:?}", temp);
         return temp
     }
 
@@ -116,7 +121,6 @@ impl Page {
         let end: usize = 8 + usize::from(6 * count);
         let mut slice = vec![0; slice_size];
         slice.clone_from_slice(&self.data[8..usize::from(end)]);
-        println!("entries slice {:?}", slice);
         let mut dst = [0,0];
         let mut dst1= [0,0];
         let mut dst2 = [0,0];
@@ -162,7 +166,6 @@ impl Page {
         return header.page_id
     }
 
-
     /// Attempts to add a new value to this page if there is space available.
     /// Returns Some(SlotId) if it was inserted or None if there was not enough space.
     /// Note that where the bytes are stored in the page does not matter (heap), but it
@@ -189,15 +192,10 @@ impl Page {
             // deserializing to get min slot 
             let entries: Entries = self.deserialize_entries();
             let min_slot = Page::min_slot(&entries);
-            let mut vec = Vec::new();
-            entries.entries.iter().for_each(|x| vec.push(x.slot_id));
-            let mut vec1 = Vec::new();
-            entries.entries.iter().for_each(|x| vec1.push(x.length));
-            let mut vec2 = Vec::new();
-            entries.entries.iter().for_each(|x| vec2.push(x.address));
-
             // create new entry, serialize it, append it to others 
-            let new_entry = Entry {slot_id: min_slot, address: header.end_free, length: length}; //entry 
+            let new_entry = Entry {slot_id: min_slot, address: header.end_free, length: length};
+            let start_i = usize::from(header.end_free) - usize::from(length);
+            let end_i = usize::from(header.end_free);
             let mut s_new_entry = Page::serialize_entry(&new_entry); // vec<u8> 
             s_entries.append(&mut s_new_entry);
             //update header 
@@ -206,7 +204,10 @@ impl Page {
             let mut s_header = Page::serialize_header(&header);
             s_header.append(&mut s_entries);
             let header_size = usize::from(header.count * 6 + 8); 
+            // writing header to data 
             self.data[0..header_size].clone_from_slice(&s_header);
+            // writing entry to data
+            self.data[start_i..end_i].clone_from_slice(&bytes);
             Some(min_slot)
         }
     }
@@ -214,8 +215,25 @@ impl Page {
 
     /// Return the bytes for the slotId. If the slotId is not valid then return None
     pub fn get_value(&self, slot_id: SlotId) -> Option<Vec<u8>> {
-        panic!("TODO milestone pg");
+        let entries: Entries = self.deserialize_entries();
+        let mut iter = entries.entries.iter().find(|x| x.slot_id==slot_id);
+        match iter {
+            Some(x) =>  return self.retrieve_data(x),
+            None    => return None
+        };
+
     }
+
+    pub fn retrieve_data(&self, entry: &Entry) -> Option<Vec<u8>>  {
+        let address = usize::from(entry.address);
+        let length = usize::from(entry.length); 
+        let start = address-length; 
+        let mut ret : Vec<u8> = vec![0; length];
+        ret.clone_from_slice(&self.data[start..address]);
+        return Some(ret)
+    }
+
+
 
     /// Delete the bytes/slot for the slotId. If the slotId is not valid then return None
     /// The slotId for a deleted slot should be assigned to the next added value
@@ -240,8 +258,7 @@ impl Page {
     /// HINT: To convert a vec of bytes using little endian, use
     /// to_le_bytes().to_vec()
     pub fn get_bytes(&self) -> Vec<u8> {
-
-        panic!("TODO milestone pg");
+        return self.data.to_vec();
     }
 
     /// A utility function to determine the size of the header in the page
