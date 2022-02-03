@@ -5,20 +5,19 @@ use std::mem;
 use serde::{Serialize, Deserialize};
 use ::slice_of_array::prelude::*;
 
-// make separate struct for entries, serialize together in header
-// to get length of header, deserialize headerinfo, use count to determine array size 
-
 
 #[derive(Serialize, Deserialize)]
 pub struct Entry {
     pub slot_id: SlotId, // 2 bytes
     pub address: u16,  // 2 bytes
     pub length: u16 // 2 bytes
+    //pub empty: bool 
 }
 
 pub struct Entries {
     pub entries: Vec<Entry> 
 }
+
 
 impl Entries {
 
@@ -27,54 +26,20 @@ impl Entries {
         Entries { entries: vec}
     }
 
-    pub fn add_entry(mut self, entry:Entry){
-        self.entries.push(entry);
-    }
-
-    pub fn serialize_entry(entry: &Entry) ->  Vec<u8> {
-        let mut temp: Vec<u8> = (&entry.slot_id.to_be_bytes()).to_vec();
-        let mut addr: Vec<u8> = (&entry.address.to_be_bytes()).to_vec();
-        let mut length: Vec<u8> = (&entry.length.to_be_bytes()).to_vec();
-        temp.append(& mut addr);
-        temp.append(& mut length);
-        return temp
-
-    }
-
-    pub fn serialize_entries(&mut self) -> Vec<u8> {
-        let temp = &mut self.entries;
-        let mut ret = Vec::new();
-        temp.iter_mut().for_each(|x| ret.append(&mut Entries::serialize_entry(x)));
-        ret
-
-  
-
-    }  
-
 }
 
 pub struct Header {
     pub page_id: PageId, //2 bytes 
     pub count: u16, //2 byte
-    pub end_free: u16 // 2 byte 
+    pub end_free: u16,// 2 byte 
+    //don't need
     pub min_slot: SlotId // 2 byte
 
 }
 
 impl Header{
-    pub fn new(page_id: PageId, end_free: u32) -> Self{
+    pub fn new(page_id: PageId, end_free: u16) -> Self{
         Header {page_id: page_id, count: 0, min_slot: 0, end_free: end_free }
-    }
-
-    pub fn serialize_header(&self) ->  Vec<u8> {
-        let mut temp: Vec<u8> = (&self.page_id.to_be_bytes()).to_vec();
-        let mut count: Vec<u8> = (&self.count.to_be_bytes()).to_vec();
-        let mut end_free: Vec<u8> = (&self.end_free.to_be_bytes()).to_vec();
-        let mut min_slot: Vec<u8> = (&self.min_slot.to_be_bytes()).to_vec();
-        temp.append(& mut count);
-        temp.append(& mut end_free);
-        temp.append(& mut min_slot);
-        return temp
     }
 
 }
@@ -94,15 +59,101 @@ pub(crate) struct Page {
 
 /// The functions required for page
 impl Page {
+
+    // helper functions
+
+    pub fn serialize_header(header: &Header) ->  Vec<u8> {
+        let mut temp: Vec<u8> = (&header.page_id.to_be_bytes()).to_vec();
+        let mut count: Vec<u8> = (&header.count.to_be_bytes()).to_vec();
+        let mut end_free: Vec<u8> = (&header.end_free.to_be_bytes()).to_vec();
+        let mut min_slot: Vec<u8> = (&header.min_slot.to_be_bytes()).to_vec();
+        temp.append(& mut count);
+        temp.append(& mut end_free);
+        temp.append(& mut min_slot);
+        return temp
+    }
+
+    pub fn deserialize_header(&self) -> Header {
+        let mut dst = [0,0];
+        let mut dst1= [0,0];
+        let mut dst2 = [0,0];
+        let mut dst3 = [0,0];
+        dst.clone_from_slice(&self.data[..2]);
+        dst1.clone_from_slice(&self.data[2..4]);
+        dst2.clone_from_slice(&self.data[4..6]);
+        dst3.clone_from_slice(&self.data[6..8]);
+        Header { page_id: u16::from_be_bytes(dst), count: u16::from_be_bytes(dst1), end_free: u16::from_be_bytes(dst2), min_slot: u16::from_be_bytes(dst3)}
+    }
+
+
+    pub fn serialize_entry(entry: &Entry) ->  Vec<u8> {
+        println!("in serialize entry line 27 slot_id {} address {} length {}", entry.slot_id, entry.address, entry.length);
+        let mut temp: Vec<u8> = (&entry.slot_id.to_be_bytes()).to_vec();
+        let mut addr: Vec<u8> = (&entry.address.to_be_bytes()).to_vec();
+        let mut length: Vec<u8> = (&entry.length.to_be_bytes()).to_vec();
+        temp.append(& mut addr);
+        temp.append(& mut length);
+        println!("in serialize entry byte array is {:?}", temp);
+        return temp
+    }
+
+    pub fn serialize_entries(entries: &Entries) -> Vec<u8> {
+        let temp = &entries.entries;
+        let mut ret = Vec::new();
+        temp.iter().for_each(|x| ret.append(&mut Page::serialize_entry(x)));
+        ret
+    }  
+
+
+    pub fn deserialize_entries(&self) -> Entries {
+        let header = self.deserialize_header();
+        let mut vec = Vec::new();
+        let count = usize::from(header.count);
+        if count == 0 {
+            return Entries { entries : vec};
+        }
+        let slice_size : usize = count * 6; 
+        let end: usize = 8 + usize::from(6 * count);
+        let mut slice = vec![0; slice_size];
+        slice.clone_from_slice(&self.data[8..usize::from(end)]);
+        println!("entries slice {:?}", slice);
+        let mut dst = [0,0];
+        let mut dst1= [0,0];
+        let mut dst2 = [0,0];
+        for i in 0..count {
+            dst.clone_from_slice(&slice[i*6..i*6+2]);
+            dst1.clone_from_slice(&slice[i*6+2..i*6+4]);
+            dst2.clone_from_slice(&slice[i*6+4..i*6+6]);
+            let slot_id = u16::from_be_bytes(dst);
+            let address = u16::from_be_bytes(dst1);
+            let length =  u16::from_be_bytes(dst2);
+            let entry : Entry = Entry {slot_id: slot_id, address:address, length:length};
+            vec.push(entry)
+        }
+        Entries { entries : vec}
+
+    }
+    pub fn min_slot(entries:&Entries) -> SlotId {
+        let mut vec = Vec::new();
+        entries.entries.iter().for_each(|x| vec.push(x.slot_id));
+        return Page::find_lowest(0, vec);
+    }
+
+    pub fn find_lowest(n: u16, slots: Vec<SlotId>) -> u16 {
+        let res = slots.iter().position(|&x| x==n);
+        match res {
+            Some(y) => Page::find_lowest(n+1, slots),
+            None => return n 
+        }
+    }
     /// Create a new page
     pub fn new(page_id: PageId) -> Self {
         let header : Header = Header::new(page_id, PAGE_SIZE.try_into().unwrap()); //struct 
-        let mut s_header = Header::serialize_header(&header); //vec<u8> 
+        let mut s_header = Page::serialize_header(&header);
         let mut data : Vec<u8> = vec![0; PAGE_SIZE -8];
         s_header.append(& mut data);
         Page { data: *s_header.as_array()}
     }
-
 
 
     /// Return the page id for a page
@@ -111,10 +162,6 @@ impl Page {
         return header.page_id
     }
 
-
-// Because the slices have to be the same length,
-// we slice the source slice from four elements
-// to two. It will panic if we don't do this.
 
     /// Attempts to add a new value to this page if there is space available.
     /// Returns Some(SlotId) if it was inserted or None if there was not enough space.
@@ -128,8 +175,42 @@ impl Page {
     /// self.data[X..y].clone_from_slice(&bytes);
 
     pub fn add_value(&mut self, bytes: &[u8]) -> Option<SlotId> {
-        panic!("TODO milestone pg");
+        let max = self.get_largest_free_contiguous_space();
+        let length : u16 = bytes.len().try_into().unwrap();
+        if usize::from(length)  > max {
+            None
+        }
+        else {
+            let mut header: Header = self.deserialize_header();
+            let count = usize::from(header.count);
+            let mut s_entries = vec![0; count * 6];
+            // entries vector 
+            s_entries.clone_from_slice(&self.data[8..usize::from(8 + count*6)]);
+            // deserializing to get min slot 
+            let entries: Entries = self.deserialize_entries();
+            let min_slot = Page::min_slot(&entries);
+            let mut vec = Vec::new();
+            entries.entries.iter().for_each(|x| vec.push(x.slot_id));
+            let mut vec1 = Vec::new();
+            entries.entries.iter().for_each(|x| vec1.push(x.length));
+            let mut vec2 = Vec::new();
+            entries.entries.iter().for_each(|x| vec2.push(x.address));
+
+            // create new entry, serialize it, append it to others 
+            let new_entry = Entry {slot_id: min_slot, address: header.end_free, length: length}; //entry 
+            let mut s_new_entry = Page::serialize_entry(&new_entry); // vec<u8> 
+            s_entries.append(&mut s_new_entry);
+            //update header 
+            header.count = &header.count+1;
+            header.end_free = &header.end_free - length; 
+            let mut s_header = Page::serialize_header(&header);
+            s_header.append(&mut s_entries);
+            let header_size = usize::from(header.count * 6 + 8); 
+            self.data[0..header_size].clone_from_slice(&s_header);
+            Some(min_slot)
+        }
     }
+
 
     /// Return the bytes for the slotId. If the slotId is not valid then return None
     pub fn get_value(&self, slot_id: SlotId) -> Option<Vec<u8>> {
@@ -179,22 +260,11 @@ impl Page {
     #[allow(dead_code)]
     pub(crate) fn get_largest_free_contiguous_space(&self) -> usize {
         let header: Header = self.deserialize_header();
-        let header_size:u32 = self.get_header_size().try_into().unwrap();
+        let header_size:u16 = self.get_header_size().try_into().unwrap();
         return (header.end_free - header_size).try_into().unwrap() 
     }
 
-    pub fn deserialize_header(&self) -> Header {
-        let mut dst = [0,0];
-        let mut dst1= [0,0];
-        let mut dst2 = [0,0];
-        let mut dst3 = [0,0];
-        dst.clone_from_slice(&self.data[..2]);
-        dst1.clone_from_slice(&self.data[2..4]);
-        dst2.clone_from_slice(&self.data[4..6]);
-        dst3.clone_from_slice(&self.data[6..8]);
 
-        Header { page_id: u16::from_be_bytes(dst), count: u16::from_be_bytes(dst1), end_free: u16::from_be_bytes(dst2)}
-    }
 }
 
 /// The (consuming) iterator struct for a page.
