@@ -203,7 +203,7 @@ impl Page {
             let new_entries = Entries { entries : ret};
             self.serialize_entries(&new_entries);     
            // println!("(if statement) new entry added slot_id {} address {} length {} ", new_entry.slot_id, new_entry.address, new_entry.length);
-            println!("header count is {}", header.count);
+            // println!("header count is {}", header.count);
             let ret_entry_2 = Entry { slot_id: slot_id, address: slot.address, length:length};
             return ret_entry_2;
         }
@@ -211,14 +211,14 @@ impl Page {
             let new_entry = Entry { slot_id: header.count, address: header.end_free, length:length };
             let new_entry2 = Entry { slot_id: header.count, address: header.end_free, length:length };
             let new_entry3 = Entry { slot_id: header.count, address: header.end_free, length:length };
-            println!("else open slot is {} length is {} address is {}", header.count, length, header.end_free);
+            // println!("else open slot is {} length is {} address is {}", header.count, length, header.end_free);
             entries.entries.push(new_entry);
             header.end_free = &header.end_free - length; 
             header.count += 1;
             self.serialize_header(&header);
             self.serialize_entries(&entries);
-            println!("(if statement) new entry added slot_id {} address {} length {} ", new_entry3.slot_id, new_entry3.address, new_entry3.length);
-            println!("header count is {}", header.count);
+            // println!("(if statement) new entry added slot_id {} address {} length {} ", new_entry3.slot_id, new_entry3.address, new_entry3.length);
+            // println!("header count is {}", header.count);
             return new_entry2;
         }
     }
@@ -272,12 +272,12 @@ impl Page {
             let start_i = usize::from(new_entry.address) - usize::from(length); 
             let end_i = usize::from(new_entry.address);
             self.data[start_i..end_i].clone_from_slice(&bytes);
-            println!("added value {}", new_entry.slot_id);
+            // println!("added value {}", new_entry.slot_id);
             let entries2 = self.deserialize_entries();
-            for i in entries2.entries.iter(){
-                println!("in add_value slot id {} length {} address {} ", i.slot_id, i.length, i.address);
-            };
-            println!("added entry slot id {} length {} address {} ", new_entry.slot_id, new_entry.length, new_entry.address);
+            // for i in entries2.entries.iter(){
+            //     println!("in add_value slot id {} length {} address {} ", i.slot_id, i.length, i.address);
+            // };
+            //println!("added entry slot id {} length {} address {} ", new_entry.slot_id, new_entry.length, new_entry.address);
             Some(new_entry.slot_id)
         }
     }
@@ -317,7 +317,7 @@ impl Page {
     /// HINT: Return Some(()) for a valid delete
     pub fn delete_value(&mut self, slot_id: SlotId) -> Option<()> {
         let slot = self.get_value(slot_id);
-        println!("deleting slot {}", slot_id);
+       // println!("deleting slot {}", slot_id);
         if slot.is_none(){
             return None
         }
@@ -333,7 +333,7 @@ impl Page {
         self.serialize_header(&header);
         let entries = self.deserialize_entries();
         for i in entries.entries.iter(){
-            println!("in delete_value slot id {} length {} address {} ", i.slot_id, i.length, i.address);
+            //println!("in delete_value slot id {} length {} address {} ", i.slot_id, i.length, i.address);
         };
         Some(())
 
@@ -402,7 +402,7 @@ impl Iterator for PageIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         let count = self.page.deserialize_header().count;
-        println!("{} slot_id in iterator", self.slot_id);
+        //println!("{} slot_id in iterator", self.slot_id);
         if count == 0 {
             None
         }
