@@ -93,7 +93,7 @@ impl Page {
     }
 
 
-    pub fn serialize_entry(entry: &Entry) ->  Vec<u8> {
+    pub fn serialize_entry(&mut self, entry: &Entry) ->  Vec<u8> {
         let mut temp: Vec<u8> = (&entry.slot_id.to_be_bytes()).to_vec();
         let mut addr: Vec<u8> = (&entry.address.to_be_bytes()).to_vec();
         let mut length: Vec<u8> = (&entry.length.to_be_bytes()).to_vec();
@@ -105,122 +105,108 @@ impl Page {
     pub fn serialize_entries(&mut self, entries: &Entries) {
         let temp = &entries.entries;
         let mut ret = Vec::new();
-        temp.iter().for_each(|x| ret.append(&mut Page::serialize_entry(x)));
+        temp.iter().for_each(|x| ret.append(&mut self.serialize_entry(x)));
         let header = self.deserialize_header();
         let count = header.count;
         self.data[8..usize::from(8+count*6)].clone_from_slice(&ret);
     } 
 
-    pub fn deserialize_entry(&self, start: usize,end:usize, slice: &Vec<u8>) -> Entry {
-        let mut dst = [0,0];
-        let mut dst1= [0,0];
-        let mut dst2 = [0,0];
-        dst.clone_from_slice(&slice[start..start+2]);
-        dst1.clone_from_slice(&slice[start+2..start+4]);
-        dst2.clone_from_slice(&slice[start+4..start+6]);
-        let slot_id = u16::from_be_bytes(dst);
-        let address = u16::from_be_bytes(dst1);
-        let length =  u16::from_be_bytes(dst2);
-        let entry : Entry = Entry {slot_id: slot_id, address:address, length:length};
-        entry
-
+    pub fn deserialize_entry(&self, slotid: SlotId) -> Option<Entry> {
+        let header = self.deserialize_header();
+        let count = header.count; 
+        if slotid > header.count + 1 {
+            return None
+        }
+        else {
+            let mut dst = [0,0];
+            let mut dst1= [0,0];
+            let mut dst2 = [0,0];
+            let si = usize::from(slotid*6 + 8);
+            dst.clone_from_slice(&self.data[si..si+2]);
+            dst1.clone_from_slice(&self.data[si+2..si+4]);
+            dst2.clone_from_slice(&self.data[si+4..si+6]);
+            let slot_id = u16::from_be_bytes(dst);
+            let address = u16::from_be_bytes(dst1);
+            let length =  u16::from_be_bytes(dst2);
+            let entry : Entry = Entry {slot_id: slot_id, address:address, length:length};
+            return Some(entry)
+        }
     }
+
     pub fn deserialize_entries(&self) -> Entries {
         let header = self.deserialize_header();
         let mut vec = Vec::new();
-        let count = usize::from(header.count);
+        let count = header.count;
         if count == 0 {
             return Entries { entries : vec};
         }
-        let slice_size : usize = count * 6; 
-        let end: usize = 8 + usize::from(6 * count);
-        let mut slice = vec![0; slice_size];
-        slice.clone_from_slice(&self.data[8..usize::from(end)]);
-
         for i in 0..count {
-            let si = i*6;
-            let ei = i*6 + 6; 
-            let entry = self.deserialize_entry(si, ei,&slice);
-            vec.push(entry)
+            let entry = self.deserialize_entry(i);
+            vec.push(entry.unwrap());
         }
         Entries { entries : vec}
 
     }
 
-    pub fn new_entry_header(&mut self, length: u16) -> Entry{
+    pub fn new_entry(&mut self, length: u16) -> Entry{
         // find first empty slot 
         let mut header = self.deserialize_header();
         let mut entries = self.deserialize_entries();
-        let entries_t = self.deserialize_entries();
+        let mut entries2 = self.deserialize_entries();
         if header.open_slots != 0 {
-            let slot = entries_t.entries.iter().filter(|x| x.length == 0).min_by_key(|x| x.slot_id).unwrap();
-            let slot_id = slot.slot_id;
-            let new_entry = Entry { slot_id: slot_id, address: slot.address, length:length};
-            println!("open slot is {} length is {} address is {}", slot_id, length, slot.address);
-            let filtered = entries.entries.iter().filter(|x| x.slot_id != slot.slot_id);
-            let mut ret = Vec::<Entry>::new();
-            let mut difference : u16 = 0;
-            if slot.length >= new_entry.length {
-                difference = slot.length - new_entry.length;
-                for f in filtered {
-                    if f.slot_id > slot_id {
-                        let address = f.address + difference;
-                        let temp = Entry {slot_id: f.slot_id, address: address, length:f.length};
-                        ret.push(temp);
-                    }
-                    else {
-                        let address = f.address;
-                        let temp = Entry {slot_id: f.slot_id, address: address, length:f.length};
-                        ret.push(temp);
-                    }
-                }
-                
-            }
-            else {
-                difference = new_entry.length - slot.length;
-                for f in filtered {
-                    if f.slot_id > slot_id {
-                        let address = f.address - difference;
-                        let temp = Entry {slot_id: f.slot_id, address: address, length:f.length};
-                        ret.push(temp);
-                    }
-                    else {
-                        let address = f.address;
-                        let temp = Entry {slot_id: f.slot_id, address: address, length:f.length};
-                        ret.push(temp);
-                    }
-                }
-            }
- 
-        
-            let ret_entry = Entry { slot_id: slot_id, address: slot.address, length:length};
-            ret.insert(slot_id.into(), ret_entry);
-            let last_element = ret.iter().max_by_key(|x| x.slot_id).unwrap();
+            // finding open slot 
+            let open_slot = entries.entries.iter().filter(|x| x.length == 0).min_by_key(|x| x.slot_id).unwrap();
+            // add new entry, shift others 
+            let new_entry = Entry { slot_id: open_slot.slot_id, address: open_slot.address, length:length};
+            let new_entry2 = Entry { slot_id: open_slot.slot_id, address: open_slot.address, length:length};
+            let updated_entries = self.shift_entries_add(new_entry);
+            // calculate new end free 
+            let last_element = updated_entries.entries.iter().max_by_key(|x| x.slot_id).unwrap();
             let end = last_element.address - last_element.length;
+            // update header 
             header.end_free = end;
             header.open_slots -= 1; 
             self.serialize_header(&header);
-            let new_entries = Entries { entries : ret};
-            self.serialize_entries(&new_entries);     
-           // println!("(if statement) new entry added slot_id {} address {} length {} ", new_entry.slot_id, new_entry.address, new_entry.length);
-            // println!("header count is {}", header.count);
-            let ret_entry_2 = Entry { slot_id: slot_id, address: slot.address, length:length};
-            return ret_entry_2;
+            return new_entry2
         }
         else {
             let new_entry = Entry { slot_id: header.count, address: header.end_free, length:length };
             let new_entry2 = Entry { slot_id: header.count, address: header.end_free, length:length };
-            let new_entry3 = Entry { slot_id: header.count, address: header.end_free, length:length };
-            // println!("else open slot is {} length is {} address is {}", header.count, length, header.end_free);
-            entries.entries.push(new_entry);
+            entries2.entries.push(new_entry);
             header.end_free = &header.end_free - length; 
             header.count += 1;
             self.serialize_header(&header);
-            self.serialize_entries(&entries);
-            // println!("(if statement) new entry added slot_id {} address {} length {} ", new_entry3.slot_id, new_entry3.address, new_entry3.length);
-            // println!("header count is {}", header.count);
+            self.serialize_entries(&entries2);
             return new_entry2;
         }
+    }
+
+    pub fn shift_entries_add(&mut self, entry:Entry) -> Entries{
+        let length = entry.length;
+        let slot_id = entry.slot_id;
+        let mut vec : Vec<Entry> = Vec::new(); 
+        let entries = self.deserialize_entries();
+        for e in entries.entries.iter(){
+            if e.slot_id == slot_id {
+                let new = Entry { slot_id: slot_id, length: length, address: e.address};
+                vec.push(new);
+            }
+            else if e.slot_id > slot_id {
+                let data = self.retrieve_data(&e).unwrap();
+                let address = e.address - length;
+                let new = Entry { slot_id: e.slot_id, length: e.length, address: address};
+                //writing value to new address
+                self.data[usize::from(address-e.length)..usize::from(address)].clone_from_slice(&data);
+                vec.push(new);
+            }
+            else{
+                let new = Entry { slot_id: e.slot_id, length: e.length, address: e.address};
+                vec.push(new);
+            }
+        }
+        let ret = Entries{ entries: vec };
+        self.serialize_entries(&ret);
+        return ret;
     }
 
 
@@ -267,17 +253,17 @@ impl Page {
             let header = self.deserialize_header();
             let count = header.count; 
             let entries = self.deserialize_entries();
+            let entries2 = self.deserialize_entries();
             //adds entry to entries, updates header count and end_free, serializes both 
-            let new_entry = self.new_entry_header(length);
+            let new_entry = self.new_entry(length);
             let start_i = usize::from(new_entry.address) - usize::from(length); 
             let end_i = usize::from(new_entry.address);
             self.data[start_i..end_i].clone_from_slice(&bytes);
-            // println!("added value {}", new_entry.slot_id);
+            println!("added entry slot id {} length {} address {} ", new_entry.slot_id, new_entry.length, new_entry.address);
             let entries2 = self.deserialize_entries();
-            // for i in entries2.entries.iter(){
-            //     println!("in add_value slot id {} length {} address {} ", i.slot_id, i.length, i.address);
-            // };
-            //println!("added entry slot id {} length {} address {} ", new_entry.slot_id, new_entry.length, new_entry.address);
+            for i in entries2.entries.iter(){
+                println!("in add_value slot id {} length {} address {} ", i.slot_id, i.length, i.address);
+            };
             Some(new_entry.slot_id)
         }
     }
@@ -285,18 +271,16 @@ impl Page {
 
     /// Return the bytes for the slotId. If the slotId is not valid then return None
     pub fn get_value(&self, slot_id: SlotId) -> Option<Vec<u8>> {
-        let entries: Entries = self.deserialize_entries();
-        let mut entry = entries.entries.iter().find(|x| x.slot_id==slot_id);
+        let entry = self.deserialize_entry(slot_id);
         if entry.is_none(){
             return None
         }
         else { 
             let x = entry.unwrap();
-           // println!("entry is slot_id {} address {} length {}", x.slot_id, x.address, x.length);
             if x.length == 0 {
                 return None
             };
-            return self.retrieve_data(x)
+            return self.retrieve_data(&x)
         }
     }
 
@@ -321,22 +305,45 @@ impl Page {
         if slot.is_none(){
             return None
         }
-        //updating entry 
-        let e_len_loc = usize::from(8 + (slot_id * 6) + 4);
-        let leng = [0;2];
-        &self.data[e_len_loc..e_len_loc+2].clone_from_slice(&leng);
-
-
+        let entry = self.deserialize_entry(slot_id).unwrap();
+        self.shift_entries_del(entry); 
         //updating header count
         let mut header = self.deserialize_header();
         header.open_slots = &header.open_slots + 1;
         self.serialize_header(&header);
-        let entries = self.deserialize_entries();
-        for i in entries.entries.iter(){
-            //println!("in delete_value slot id {} length {} address {} ", i.slot_id, i.length, i.address);
+        println!("deleted entry slot id {}", slot_id);
+        let entries2 = self.deserialize_entries();
+        for i in entries2.entries.iter(){
+            println!("in delete_value slot id {} length {} address {} ", i.slot_id, i.length, i.address);
         };
         Some(())
+    }
 
+    pub fn shift_entries_del(&mut self, entry: Entry){
+        let length = entry.length;
+        let slot_id = entry.slot_id;
+        let mut vec = Vec::new(); 
+        let entries = self.deserialize_entries();
+        for e in entries.entries.iter(){
+            if e.slot_id == slot_id {
+                let new = Entry { slot_id: e.slot_id, length: 0, address: e.address};
+                vec.push(new);
+            }
+            else if e.slot_id > slot_id {
+                let data = self.retrieve_data(&e).unwrap();
+                let address = e.address + length;
+                let new = Entry { slot_id: e.slot_id, length: e.length, address: address};
+                //writing value to new address
+                self.data[usize::from(address-length)..usize::from(address)].clone_from_slice(&data);
+                vec.push(new);
+            }
+            else{
+                let new = Entry { slot_id: e.slot_id, length: e.length, address: e.address};
+                vec.push(new);
+            }
+        }
+        let ret = Entries { entries: vec};
+        self.serialize_entries(&ret)
     }
 
     /// Create a new page from the byte array.
@@ -375,12 +382,7 @@ impl Page {
     pub(crate) fn get_largest_free_contiguous_space(&self) -> usize {
         let header: Header = self.deserialize_header();
         let header_size:u16 = self.get_header_size().try_into().unwrap();
-        let entries = self.deserialize_entries();
-        let max_open_slot = entries.entries.iter().filter(|x| x.length == 0).max_by_key(|x| x.length);
-        match max_open_slot {
-            Some(x) => return max(usize::from(x.length), usize::from(header.end_free - header_size)),
-            None => return usize::from(header.end_free - header_size)
-        }
+        return(usize::from(header.end_free - header_size))
 
     }
 
@@ -402,7 +404,6 @@ impl Iterator for PageIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         let count = self.page.deserialize_header().count;
-        //println!("{} slot_id in iterator", self.slot_id);
         if count == 0 {
             None
         }
@@ -410,6 +411,7 @@ impl Iterator for PageIter {
             while self.page.get_value(self.slot_id).is_none() && self.slot_id <= count{
                 self.slot_id += 1; 
             }
+            println!("slot_id in iterator is {}", self.slot_id);
             let ret = self.page.get_value(self.slot_id);
             self.slot_id +=1;
             return ret;
@@ -812,10 +814,10 @@ mod tests {
         assert_eq!(Some(tuple_bytes3.clone()), iter.next());
         assert_eq!(Some(tuple_bytes4.clone()), iter.next());
         assert_eq!(None, iter.next());
-
         //Check another way
         let p = Page::from_bytes(&page_bytes);
         assert_eq!(Some(tuple_bytes.clone()), p.get_value(0));
+        println!("line 826");
 
         for (i, x) in p.into_iter().enumerate() {
             assert_eq!(tup_vec[i], x);
@@ -841,6 +843,7 @@ mod tests {
 
         //Delete
         let mut p = Page::from_bytes(&page_bytes);
+        println!("delete value 2");
         p.delete_value(2);
         let mut iter = p.into_iter();
         assert_eq!(Some(tuple_bytes.clone()), iter.next());

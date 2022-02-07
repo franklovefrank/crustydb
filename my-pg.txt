@@ -1,0 +1,30 @@
+ -  A brief describe of your solution, in particular what design decisions you took and why. This is only needed for part of your solutions that had some significant work (e.g. just returning a counter or a pass through function has no design decision).
+- How long you roughly spent on the milestone, and what would have liked/disliked on the milestone.
+- If you know some part of the milestone is incomplete, write up what parts are not working, how close you think you are, and what part(s) you got stuck on.
+
+
+For my solution, I made an "entry" struct with the slot id, address, and length, an "entries" struct which is a vector of entry, and a header struct with 
+page id, number of entries, the address of the end of the heap, and the number of open slots. I kept the page struct as a u8 array.  I added helper functions to serialize and deserialize each of these structs.
+The serialize helper functions directly updated the data array of the page. 
+
+For my "new" function, I initialized a header struct and then serialized it as a vector. Then I made a vector of zeros of size page_size - header_size and appended it to the serialized header before setting it as the page data. 
+This function reuses a lot of code from my serialize_header struct. This is because my serialize_header function relies on the page already being instantiated. 
+ 
+For the "page_id" function, I deserialized the header and pulled the value from the page_id field. 
+
+For the "add_value" function, I found the largest free contiguous space and returned none if the length of the input was greater.I deserialized my entries and header, and checked if there 
+was an empty slot. If there was an empty slot, I inserted new value in that slot. i then used a helper function to shift the entries address by the length of the new value and updated their metadata accordingly. 
+If there wasn't an empty slot, I created a new entry and pushed it to the end. then I updated the relevant meta data in the header and reserialized it. 
+The "delete value" function had a similar strategy. To mark if a slot had been deleted, I changed its length to zero and moved all the other slots accordingly.
+
+The from bytes and get bytes functions were very easy to write, since I kept the page struct as a byte array 
+
+Since I always shifted my entries with deletes/adds, to find the largest free contiguous space, I just had to subtract the header_size (8 + count *6) from the end_free variable I tracked in the header struct 
+
+For my iterator, I kept an index and checked if it was less than the number of entries i had recorded in the header. I called get_value with my index until it returned Some(value)
+
+Hardest part of this milestone was working with idiomatic rust. lots of time debugging reference/type errors. doc pages don't always make sense to me.
+i originally wrote insertion function to skip slot if the previous value in it had a smaller length. it took quite a bit of time rewriting and 
+I was a bit peeved the instructions weren't more  clear. overall i think i spent more than 30 hours on this :(  For context, this is my last class
+in the major and I have a year of experience as a full time back end engineer at a reputable company. im not super good at this stuff but i give serious effort..
+why are yall doing this?? level of difficulty is reasonable but it's way too much
