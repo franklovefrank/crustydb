@@ -8,18 +8,11 @@ use std::cmp::min;
 use std::cmp::max;
 
 
-// inserting values: need to update so min of slot_id in entries s.t. (open == true ) && (length > val.length) 
-// if false, then new slot 
-//delete values: change length to 0 
-// have to recalculate length -- > find entry with slot_id = id + 1
-
-
 #[derive(Serialize, Deserialize)]
 pub struct Entry {
     pub slot_id: SlotId, // 2 bytes
     pub address: u16,  // 2 bytes
     pub length: u16, // 2 byte 
-    //need to reserialize
 }
 
 pub struct Entries {
@@ -28,12 +21,10 @@ pub struct Entries {
 
 
 impl Entries {
-
     pub fn new() -> Self {
         let vec = Vec::new();
         Entries { entries: vec}
     }
-
 }
 
 pub struct Header {
@@ -52,15 +43,8 @@ impl Header{
 }
 
 
-/// The struct for a page. Note this can hold more elements/meta data when created,
-/// but it must be able to be packed/serialized/marshalled into the data array of size
-/// PAGE_SIZE. In the header, you are allowed to allocate 8 bytes for general page metadata and
-/// 6 bytes per value/entry/slot stored. For example a page that has stored 3 values, can use
-/// up to 8+3*6=26 bytes, leaving the rest (PAGE_SIZE-26 for data) when serialized.
-/// You do not need reclaim header information for a value inserted (eg 6 bytes per value ever inserted)
-/// The rest must filled as much as possible to hold values.
 pub(crate) struct Page {
-    /// The data for data
+    /// The data for page 
     data: [u8; PAGE_SIZE],
 }
 
@@ -77,6 +61,7 @@ impl Page {
         temp.append(& mut count);
         temp.append(& mut end_free);
         temp.append(& mut open_slots);
+        //writes directly to page 
         self.data[0..8].clone_from_slice(&temp);
     }
 
@@ -108,6 +93,7 @@ impl Page {
         temp.iter().for_each(|x| ret.append(&mut self.serialize_entry(x)));
         let header = self.deserialize_header();
         let count = header.count;
+        //writes directly to page 
         self.data[8..usize::from(8+count*6)].clone_from_slice(&ret);
     } 
 
@@ -170,11 +156,14 @@ impl Page {
             return new_entry2
         }
         else {
+            // duplicate because of reference errors 
             let new_entry = Entry { slot_id: header.count, address: header.end_free, length:length };
             let new_entry2 = Entry { slot_id: header.count, address: header.end_free, length:length };
             entries2.entries.push(new_entry);
+            //updating header 
             header.end_free = &header.end_free - length; 
             header.count += 1;
+            //serializing 
             self.serialize_header(&header);
             self.serialize_entries(&entries2);
             return new_entry2;
@@ -188,10 +177,12 @@ impl Page {
         let entries = self.deserialize_entries();
         for e in entries.entries.iter(){
             if e.slot_id == slot_id {
-                let new = Entry { slot_id: slot_id, length: length, address: e.address};
+                //updating previous entry with slot id with new length 
+                let new = Entry { slot_id: e.slot_id, length: length, address: e.address};
                 vec.push(new);
             }
             else if e.slot_id > slot_id {
+                // if slot_id to the left of inserted slot, update address and rewrite data with new address 
                 let data = self.retrieve_data(&e).unwrap();
                 let address = e.address - length;
                 let new = Entry { slot_id: e.slot_id, length: e.length, address: address};
@@ -200,6 +191,7 @@ impl Page {
                 vec.push(new);
             }
             else{
+                // if slot_id is less than, keep the same 
                 let new = Entry { slot_id: e.slot_id, length: e.length, address: e.address};
                 vec.push(new);
             }
@@ -212,6 +204,7 @@ impl Page {
 
     /// Create a new page
     pub fn new(page_id: PageId) -> Self {
+        //initialize header 
         let header : Header = Header::new(page_id, PAGE_SIZE.try_into().unwrap()); //struct 
         let mut temp: Vec<u8> = (&header.page_id.to_be_bytes()).to_vec();
         let mut count: Vec<u8> = (&header.count.to_be_bytes()).to_vec();
@@ -220,6 +213,7 @@ impl Page {
         temp.append(& mut count);
         temp.append(& mut end_free);
         temp.append(& mut open_slots);
+        // add empty vector to header
         let mut data : Vec<u8> = vec![0; PAGE_SIZE -8];
         temp.append(& mut data);
         Page { data: *temp.as_array()}
@@ -259,11 +253,7 @@ impl Page {
             let start_i = usize::from(new_entry.address) - usize::from(length); 
             let end_i = usize::from(new_entry.address);
             self.data[start_i..end_i].clone_from_slice(&bytes);
-            println!("added entry slot id {} length {} address {} ", new_entry.slot_id, new_entry.length, new_entry.address);
             let entries2 = self.deserialize_entries();
-            for i in entries2.entries.iter(){
-                println!("in add_value slot id {} length {} address {} ", i.slot_id, i.length, i.address);
-            };
             Some(new_entry.slot_id)
         }
     }
@@ -285,6 +275,7 @@ impl Page {
     }
 
     pub fn retrieve_data(&self, entry: &Entry) -> Option<Vec<u8>>  {
+        //helper function to retrieve data given valid slot_id 
         let address = usize::from(entry.address);
         let length = usize::from(entry.length); 
         let start = address-length; 
@@ -301,35 +292,33 @@ impl Page {
     /// HINT: Return Some(()) for a valid delete
     pub fn delete_value(&mut self, slot_id: SlotId) -> Option<()> {
         let slot = self.get_value(slot_id);
-       // println!("deleting slot {}", slot_id);
         if slot.is_none(){
             return None
         }
         let entry = self.deserialize_entry(slot_id).unwrap();
         self.shift_entries_del(entry); 
-        //updating header count
+        //updating header count and reserialize
         let mut header = self.deserialize_header();
         header.open_slots = &header.open_slots + 1;
         self.serialize_header(&header);
-        println!("deleted entry slot id {}", slot_id);
-        let entries2 = self.deserialize_entries();
-        for i in entries2.entries.iter(){
-            println!("in delete_value slot id {} length {} address {} ", i.slot_id, i.length, i.address);
-        };
         Some(())
     }
 
     pub fn shift_entries_del(&mut self, entry: Entry){
+        // getting info about entry to be deleted 
         let length = entry.length;
         let slot_id = entry.slot_id;
+        // return vec
         let mut vec = Vec::new(); 
         let entries = self.deserialize_entries();
         for e in entries.entries.iter(){
             if e.slot_id == slot_id {
+                // if target entry, change length to 0 
                 let new = Entry { slot_id: e.slot_id, length: 0, address: e.address};
                 vec.push(new);
             }
             else if e.slot_id > slot_id {
+                // for entries to the left -> shift address and rewrite data 
                 let data = self.retrieve_data(&e).unwrap();
                 let address = e.address + length;
                 let new = Entry { slot_id: e.slot_id, length: e.length, address: address};
@@ -338,11 +327,13 @@ impl Page {
                 vec.push(new);
             }
             else{
+                // for entries to the right: keep it the same 
                 let new = Entry { slot_id: e.slot_id, length: e.length, address: e.address};
                 vec.push(new);
             }
         }
         let ret = Entries { entries: vec};
+        //serialize return vector to page 
         self.serialize_entries(&ret)
     }
 
@@ -382,7 +373,7 @@ impl Page {
     pub(crate) fn get_largest_free_contiguous_space(&self) -> usize {
         let header: Header = self.deserialize_header();
         let header_size:u16 = self.get_header_size().try_into().unwrap();
-        return(usize::from(header.end_free - header_size))
+        return usize::from(header.end_free - header_size);
 
     }
 
@@ -411,7 +402,6 @@ impl Iterator for PageIter {
             while self.page.get_value(self.slot_id).is_none() && self.slot_id <= count{
                 self.slot_id += 1; 
             }
-            println!("slot_id in iterator is {}", self.slot_id);
             let ret = self.page.get_value(self.slot_id);
             self.slot_id +=1;
             return ret;
