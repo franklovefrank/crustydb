@@ -26,7 +26,6 @@ pub(crate) struct HeapFile {
     // The following are for profiling/ correctness checks
     pub read_count: AtomicU16,
     pub write_count: AtomicU16,
-    pub container_id: ContainerId,
     file_lock: Arc<RwLock<File>>,
     open_space_lock: Arc<RwLock<Vec<usize>>>
 }
@@ -56,7 +55,6 @@ impl HeapFile {
         Ok(HeapFile {
             read_count: AtomicU16::new(0),
             write_count: AtomicU16::new(0),
-            container_id: container_id,
             file_lock: Arc::new(RwLock::new(file)),
             open_space_lock: Arc::new(RwLock::new(Vec::new()))
         })
@@ -103,8 +101,38 @@ impl HeapFile {
         {
             self.write_count.fetch_add(1, Ordering::Relaxed);
         }
-        panic!("TODO milestone hs");
+        let num_pages: usize = self.num_pages().into();
+        let page_id = page.deserialize_header().page_id;
+        let mut file = self.file_lock.write().unwrap();
+        if num_pages <= usize::from(page_id) {
+            file.seek(SeekFrom::End(0))?;
+            match file.write(&page.get_bytes()) {
+                Err(e) => {
+                    return Err(CrustyError::IOError("write error".to_string()));
+                }
+                Ok(_) => {
+                    let mut empty_space = self.open_space_lock.write().unwrap();
+                    empty_space.push(page.get_largest_free_contiguous_space());
+                    return Ok(());
+                }
+            }
+        }
+
+        file.seek(SeekFrom::Start(
+            (4096 * page_id as usize).try_into().unwrap(),
+        ));
+        match file.write(&page.get_bytes()) {
+            Err(e) => {
+                return Err(CrustyError::IOError("write error".to_string()));
+            }
+            Ok(_) => {
+                let mut empty_space = self.open_space_lock.write().unwrap();
+                empty_space[page_id as usize] = page.get_largest_free_contiguous_space();
+                return Ok(());
+            }
+        }
     }
+
 }
 
 #[cfg(test)]
@@ -136,7 +164,7 @@ mod test {
         let bytes = get_random_byte_vec(100);
         p0.add_value(&bytes);
         let p0_bytes = p0.get_bytes();
-
+        println!("before write");
         hf.write_page_to_file(p0);
         //check the page
         assert_eq!(1, hf.num_pages());
