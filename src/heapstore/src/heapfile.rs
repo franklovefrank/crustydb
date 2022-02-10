@@ -1,5 +1,6 @@
 use crate::page::Page;
 use common::ids::PageId;
+use common::ids::ContainerId;
 use common::{CrustyError, PAGE_SIZE};
 use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
@@ -22,11 +23,12 @@ use std::io::{Seek, SeekFrom};
 /// Your code should persist what information is needed to recreate the heapfile.
 ///
 pub(crate) struct HeapFile {
-    // TODO milestone hs (add new fields)
-
     // The following are for profiling/ correctness checks
     pub read_count: AtomicU16,
     pub write_count: AtomicU16,
+    pub container_id: ContainerId,
+    file_lock: Arc<RwLock<File>>,
+    open_space_lock: Arc<RwLock<Vec<usize>>>
 }
 
 /// HeapFile required functions
@@ -51,12 +53,12 @@ impl HeapFile {
             }
         };
 
-        // TODO milestone hs
-
         Ok(HeapFile {
-            // TODO milestone hs init your new field(s)
             read_count: AtomicU16::new(0),
             write_count: AtomicU16::new(0),
+            container_id: container_id,
+            file_lock: Arc::new(RwLock::new(file)),
+            open_space_lock: Arc::new(RwLock::new(Vec::new()))
         })
     }
 
@@ -64,7 +66,10 @@ impl HeapFile {
     /// Return type is PageId (alias for another type) as we cannot have more
     /// pages than PageId can hold.
     pub fn num_pages(&self) -> PageId {
-        panic!("TODO milestone hs");
+        let file = self.file_lock.read().unwrap();
+        let length = file.metadata().unwrap().len();
+        let ret: PageId = (length/ 4096).try_into().unwrap();
+        return ret;
     }
 
     /// Read the page from the file.
@@ -74,8 +79,20 @@ impl HeapFile {
         #[cfg(feature = "profile")]
         {
             self.read_count.fetch_add(1, Ordering::Relaxed);
+        };
+        let num_pages = usize::from(self.num_pages());
+        if num_pages > usize::from(pid){
+            let mut buffer = [0; PAGE_SIZE];
+            let mut file = self.file_lock.write().unwrap();
+            let si = PAGE_SIZE * pid as usize;
+            file.seek(SeekFrom::Start(si.try_into().unwrap()))?;
+            file.read(&mut buffer[..])?;
+            let page = Page::from_bytes(&buffer);
+            Ok(page)
         }
-        panic!("TODO milestone hs");
+        else{
+            Err(CrustyError::CrustyError("page id is invalid".to_string()))
+        }
     }
 
     /// Take a page and write it to the underlying file.
