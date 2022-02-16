@@ -107,7 +107,7 @@ impl HeapFile {
         if num_pages <= usize::from(page_id) {
             file.seek(SeekFrom::End(0))?;
             match file.write(&page.get_bytes()) {
-                Err(e) => {
+                Err(_e) => {
                     return Err(CrustyError::IOError("write error".to_string()));
                 }
                 Ok(_) => {
@@ -122,7 +122,7 @@ impl HeapFile {
             (4096 * page_id as usize).try_into().unwrap(),
         ));
         match file.write(&page.get_bytes()) {
-            Err(e) => {
+            Err(_e) => {
                 return Err(CrustyError::IOError("write error".to_string()));
             }
             Ok(_) => {

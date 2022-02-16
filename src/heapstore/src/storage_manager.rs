@@ -115,35 +115,34 @@ impl StorageTrait for StorageManager {
         if value.len() > PAGE_SIZE {
             panic!("Cannot handle inserting a value larger than the page size");
         }
-        else {
-            let map = &*self.hash_map.read().unwrap();
-            let mut hf = map.get(&container_id).unwrap();
-            let num_pages = HeapFile::num_pages(hf);
-            let mut page_id = 0;
+        let map = &*self.hash_map.read().unwrap();
+        let mut hf = map.get(&container_id).unwrap();
+        let num_pages = HeapFile::num_pages(hf);
+        let mut page_id = 0;
 
-            while page_id < num_pages{
-                let read_res = hf.read_page_from_file(page_id);
-                match read_res {
-                    Ok(mut p) => {
-                        match p.add_value(&value){ 
-                            None => {
-                                page_id +=1; 
-                            } 
-                            Some(slot) => {
-                                return ValueId{
-                                    container_id: container_id,
-                                    segment_id: None,
-                                    page_id: Some(p.deserialize_header().page_id),
-                                    slot_id: Some(slot),
-                                }
-                            } 
+        while page_id < num_pages{
+            let read_res = hf.read_page_from_file(page_id);
+            match read_res {
+                Ok(mut p) => {
+                    match p.add_value(&value){ 
+                        None => {
+                            page_id +=1; 
+                        } 
+                        Some(slot) => {
+                            return ValueId{
+                                container_id: container_id,
+                                segment_id: None,
+                                page_id: Some(p.deserialize_header().page_id),
+                                slot_id: Some(slot),
+                            }
                         } 
                     } 
-                    _ => {
-                        panic!("oops");
-                    } 
+                }
+                _ => {
+                    panic!("oh no");
                 } 
-            }
+            } 
+        }
 
             let mut new = Page::new(page_id);
             hf.write_page_to_file(new);
@@ -153,7 +152,6 @@ impl StorageTrait for StorageManager {
                 page_id: Some(page_id),
                 slot_id: Some(0),
             }
-        }
     }
 
     /// Insert some bytes into a container for vector of values (e.g. record).
@@ -282,9 +280,9 @@ impl StorageTrait for StorageManager {
     ) -> Self::ValIterator {
 
         /* Get the heapfile pointer given the provided container_id */
-        let mut map = &mut self.hash_map.read().unwrap();
-        let mut hf = map.get(&container_id).unwrap();
-        return HeapFileIterator::new(container_id, tid, heapfile);
+        let mut map = self.hash_map.read().unwrap();
+        let hf = map.get(&container_id).unwrap().clone();
+        return HeapFileIterator::new(container_id, tid, hf);
     }
 
     /// Get the data for a particular ValueId. Error if does not exists
@@ -294,7 +292,23 @@ impl StorageTrait for StorageManager {
         tid: TransactionId,
         perm: Permissions,
     ) -> Result<Vec<u8>, CrustyError> {
-        panic!("TODO milestone hs");
+        let map = self.hash_map.read().unwrap();
+        let hf = map.get(&id.container_id).unwrap().clone();
+        if id.page_id.is_none() || id.slot_id.is_none()
+        {
+            return Err(CrustyError::CrustyError(String::from("get_value: ValidId invalid")))
+        }
+        match hf.read_page_from_file(id.page_id.unwrap())
+        {
+            Ok(page) =>
+                match page.get_value(id.slot_id.unwrap())
+                {
+                    Some(value) => return Ok(value),
+                    None => return Err(CrustyError::CrustyError(String::from("get_value: could not get value from page")))
+                },
+            Err(error) => return Err(CrustyError::CrustyError(String::from("get_value: could not read page from file")))
+        }
+
     }
 
     /// Notify the storage manager that the transaction is finished so that any held resources can be released.
