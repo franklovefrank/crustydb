@@ -84,7 +84,7 @@ impl HeapFile {
             let mut file = self.file_lock.write().unwrap();
             let si = PAGE_SIZE * pid as usize;
             file.seek(SeekFrom::Start(si.try_into().unwrap()))?;
-            file.read(&mut buffer[..])?;
+            file.read(&mut buffer)?;
             let page = Page::from_bytes(&buffer);
             Ok(page)
         }
