@@ -23,15 +23,16 @@ impl HeapFileIterator {
     /// Create a new HeapFileIterator that stores the container_id, tid, and heapFile pointer.
     /// This should initialize the state required to iterate through the heap f.
     pub(crate) fn new(container_id: ContainerId, tid: TransactionId, hf: Arc<HeapFile>) -> Self {
-        let mut f = &hf.clone();
-        let mut page = HeapFile::read_page_from_file(f, 0).unwrap(); 
-        let mut iter = page.into_iter();
-        let ret= HeapFileIterator{c_id: container_id, 
-                                        t_id: tid,
-                                        hf: hf, 
-                                        cur: iter, 
-                                        page_id: 0};
-        return ret;
+        let page = HeapFile::read_page_from_file(&hf.clone(), 0);
+        match page{
+            Err(e) => panic!("something went wrong"),
+            Ok(p) =>  HeapFileIterator{c_id: container_id, 
+                t_id: tid,
+                hf: hf, 
+                cur: p.into_iter(),
+                page_id: 0}
+        }   
+
     }
 }
 
@@ -41,22 +42,23 @@ impl Iterator for HeapFileIterator {
     type Item = Vec<u8>;
     
     fn next(&mut self) -> Option<Self::Item> {
-        let cnt = self.hf.num_pages();
-        while self.page_id <= cnt {
+        while self.page_id <= self.hf.num_pages() {
             match self.cur.next(){
                 None => {
-                    let mut f = &self.hf.clone();
+                    let file = &self.hf.clone();
                     self.page_id = &self.page_id + 1;
-                    let p = HeapFile::read_page_from_file(f, self.page_id).unwrap();
-                    let iter = p.into_iter();
-                    self.cur = iter;
+                    let page = HeapFile::read_page_from_file(file, self.page_id);
+                    match page{
+                        Err(e) => panic!("something went wrong"),
+                        Ok(p) => { self.cur = p.into_iter(); }
+                    }
                     
                 }
-                Some(data) => {
-                    return Some(data);
+                Some(res) => {
+                    Some(res);
                 }
             }
         }
-        return None;  
+        None
     }
 }

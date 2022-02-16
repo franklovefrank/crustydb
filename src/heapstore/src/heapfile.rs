@@ -7,7 +7,7 @@ use std::io::prelude::*;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, RwLock};
-
+use std::mem;
 use std::io::BufWriter;
 use std::io::{Seek, SeekFrom};
 
@@ -26,8 +26,8 @@ pub(crate) struct HeapFile {
     // The following are for profiling/ correctness checks
     pub read_count: AtomicU16,
     pub write_count: AtomicU16,
-    file_lock: Arc<RwLock<File>>,
-    open_space_lock: Arc<RwLock<Vec<usize>>>
+    file_lock: RwLock<File>,
+    pub num_pages_lock: RwLock<PageId>
 }
 
 /// HeapFile required functions
@@ -43,20 +43,15 @@ impl HeapFile {
         {
             Ok(f) => f,
             Err(error) => {
-                return Err(CrustyError::CrustyError(format!(
-                    "Cannot open or create heap file: {} {} {:?}",
-                    file_path.to_string_lossy(),
-                    error.to_string(),
-                    error
-                )))
+                return Err(CrustyError::CrustyError(String::from("could not open file")));
             }
         };
 
         Ok(HeapFile {
             read_count: AtomicU16::new(0),
             write_count: AtomicU16::new(0),
-            file_lock: Arc::new(RwLock::new(file)),
-            open_space_lock: Arc::new(RwLock::new(Vec::new()))
+            file_lock: RwLock::new(file),
+            num_pages_lock: RwLock::new(0),
         })
     }
 
@@ -64,10 +59,8 @@ impl HeapFile {
     /// Return type is PageId (alias for another type) as we cannot have more
     /// pages than PageId can hold.
     pub fn num_pages(&self) -> PageId {
-        let file = self.file_lock.read().unwrap();
-        let length = file.metadata().unwrap().len();
-        let ret: PageId = (length/ 4096).try_into().unwrap();
-        return ret;
+        let num_pages = self.num_pages_lock.read().unwrap();
+        return num_pages.clone();
     }
 
     /// Read the page from the file.
@@ -77,20 +70,21 @@ impl HeapFile {
         #[cfg(feature = "profile")]
         {
             self.read_count.fetch_add(1, Ordering::Relaxed);
-        };
-        let num_pages = usize::from(self.num_pages());
-        if num_pages > usize::from(pid){
-            let mut buffer = [0; PAGE_SIZE];
-            let mut file = self.file_lock.write().unwrap();
-            let si = PAGE_SIZE * pid as usize;
-            file.seek(SeekFrom::Start(si.try_into().unwrap()))?;
-            file.read(&mut buffer)?;
-            let page = Page::from_bytes(&buffer);
-            Ok(page)
         }
-        else{
-            Err(CrustyError::CrustyError("page id is invalid".to_string()))
+        let mut file = self.file_lock.write().unwrap();
+        if usize::from(pid) > usize::from(self.num_pages()) - 1
+        {
+            return Err(CrustyError::CrustyError(String::from("page out of range")));
         }
+        let offset = pid as u64 * PAGE_SIZE as u64;
+        file.seek(SeekFrom::Start(offset + mem::size_of::<ContainerId>() as u64))?;
+        let mut buf = [0; PAGE_SIZE];
+        let res = file.read(&mut buf);
+        match res {
+            Err(e) => Err(CrustyError::CrustyError(String::from("reading error"))),
+            Ok(f) =>  Ok(Page::from_bytes(&buf))
+        }
+
     }
 
     /// Take a page and write it to the underlying file.
@@ -101,35 +95,21 @@ impl HeapFile {
         {
             self.write_count.fetch_add(1, Ordering::Relaxed);
         }
-        let num_pages: usize = self.num_pages().into();
-        let page_id = page.deserialize_header().page_id;
-        let mut file = self.file_lock.write().unwrap();
-        if num_pages <= usize::from(page_id) {
-            file.seek(SeekFrom::End(0))?;
-            match file.write(&page.get_bytes()) {
-                Err(_e) => {
-                    return Err(CrustyError::IOError("write error".to_string()));
-                }
-                Ok(_) => {
-                    let mut empty_space = self.open_space_lock.write().unwrap();
-                    empty_space.push(page.get_largest_free_contiguous_space());
-                    return Ok(());
-                }
-            }
-        }
+        let mut vec = Page::get_bytes(&page);
+        let arr: &[u8] = &vec;
+        if self.num_pages() <= page.get_page_id() {
+            let mut num_pages = self.num_pages_lock.write().unwrap();
+            *num_pages = *num_pages+ 1;
+        } 
 
-        file.seek(SeekFrom::Start(
-            (4096 * page_id as usize).try_into().unwrap(),
-        ));
-        match file.write(&page.get_bytes()) {
-            Err(_e) => {
-                return Err(CrustyError::IOError("write error".to_string()));
-            }
-            Ok(_) => {
-                let mut empty_space = self.open_space_lock.write().unwrap();
-                empty_space[page_id as usize] = page.get_largest_free_contiguous_space();
-                return Ok(());
-            }
+        let mut file = self.file_lock.write().unwrap();
+        let pid = page.get_page_id();
+        let offset = pid as u64 * PAGE_SIZE as u64;
+        file.seek(SeekFrom::Start(mem::size_of::<ContainerId>() as u64 + offset))?;
+        let res = file.write(arr);
+        match res {
+            Err(e) => Err(CrustyError::CrustyError(String::from("writing error"))),
+            Ok(f) => Ok(())
         }
     }
 
