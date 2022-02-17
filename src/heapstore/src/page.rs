@@ -254,6 +254,7 @@ impl Page {
             let end_i = usize::from(new_entry.address);
             self.data[start_i..end_i].clone_from_slice(&bytes);
             let entries2 = self.deserialize_entries();
+            println!("max is {}, length is {}, page_id is {} ", max, length, header.page_id);
             Some(new_entry.slot_id)
         }
     }
@@ -267,10 +268,11 @@ impl Page {
         }
         else { 
             let x = entry.unwrap();
+            //println!("retrieving entry, slot_id is {}, length is {}, address is {}", x.slot_id, x.length, x.address );
             if x.length == 0 {
                 return None
             };
-            return self.retrieve_data(&x)
+            return self.retrieve_data(&x);
         }
     }
 

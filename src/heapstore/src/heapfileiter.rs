@@ -1,87 +1,68 @@
-use crate::heapfile::HeapFile;
+use crate::{heapfile::HeapFile, page};
 use crate::page::PageIter;
-use crate::page::Page;
 use common::ids::{ContainerId, PageId, TransactionId};
-use std::sync::{Arc, RwLock};
-use std::sync::atomic::{AtomicU16, Ordering};
-
+use std::sync::Arc;
 
 #[allow(dead_code)]
 /// The struct for a HeapFileIterator.
 /// We use a slightly different approach for HeapFileIterator than
 /// standard way of Rust's IntoIter for simplicity (avoiding lifetime issues).
-/// This should store the state/metadata required to iterate through the file.
+/// This should store the state/metadata required to iterate through the f.
 ///
 /// HINT: This will need an Arc<HeapFile>
 pub struct HeapFileIterator {
+    c_id: ContainerId,
     hf: Arc<HeapFile>,
-    pid: PageId,
-    index: usize
+    cur_page: PageId,
+    iter: PageIter
 }
 
 /// Required HeapFileIterator functions
 impl HeapFileIterator {
     /// Create a new HeapFileIterator that stores the container_id, tid, and heapFile pointer.
-    /// This should initialize the state required to iterate through the heap file.
+    /// This should initialize the state required to iterate through the heap f.
     pub(crate) fn new(container_id: ContainerId, tid: TransactionId, hf: Arc<HeapFile>) -> Self {
-
-        /* Create a new heapfile iterator */
-        let heapfileiterator = HeapFileIterator {
-            hf: hf,
-            pid: 0,
-            index: 0
-        };
-        return heapfileiterator;
-    }
+        let page = HeapFile::read_page_from_file(&hf.clone(), 0);
+        match page{
+            Err(e) => panic!("something went wrong"),
+            Ok(p) =>  HeapFileIterator{
+                c_id: container_id, 
+                hf: hf, 
+                cur_page: 0,
+                iter: p.into_iter()}
+            }
+    }   
 }
 
-/// Trait implementation for heap file iterator.
+/// Trait implementation for heap f iterator.
 /// Note this will need to iterate through the pages and their respective iterators.
 impl Iterator for HeapFileIterator {
     type Item = Vec<u8>;
+    
     fn next(&mut self) -> Option<Self::Item> {
-
-        /* Clone the hf field */
-        let heapfile = self.hf.clone();
-
-        /* Check whether we need to return None */
-        if self.pid >= heapfile.num_pages() as PageId
-        {
-            return None;
-        }
-
-        /* Get the page from the heapfile given the pid argument */
-        let page = heapfile.read_page_from_file(self.pid);
-
-        /* Make sure the page is valid */
-        let valid_page = match page {
-            Ok(page) => page,
-            _ => panic!("Page not valid"), /* TODO : do we return None? Or panic!? */
-        };
-
-        /* Create an iterator for this page */
-        let page_iter = valid_page.into_iter();
-
-        let mut temp = 0;
-
-        /* Loop through every valid value and return the (index)th valid value of that page */
-        for val in page_iter
-        {
-            if self.index == temp
-            {
-                self.index +=1;
-                return Some(val)
+        let hf = self.hf.clone(); 
+        let page_count = hf.num_pages();
+        while self.cur_page < page_count {
+            let ret = self.iter.next();
+            match ret {
+                Some(data) => {
+                    return Some(data);
+                }
+                None => {
+                    self.cur_page += 1; 
+                    let heapfile = self.hf.clone();
+                    let new_page = heapfile.read_page_from_file(self.cur_page);
+                    match new_page {
+                        Ok(p) => {
+                            self.iter = p.into_iter();
+                        },
+                        Err(e) => return None
+                    }
+                }
             }
-            temp += 1;
         }
-
-        /* If we reach this point, we have already finished processing the page */
-        /* Try to return the first valid value of the next page */
-
-        self.index = 0; /* Reset the index for the next page */
-        self.pid += 1; /* Increment pid to tell the iterator to get the next page */
-
-        /* Recursively call next on the next pid */
-        return self.next();
+        return None;
     }
+
 }
+

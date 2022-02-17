@@ -130,6 +130,7 @@ impl StorageTrait for StorageManager {
         }
         let heapfile = hf.unwrap();
         let num_pages = heapfile.num_pages();
+        println!("num pages is {}", num_pages);
         let mut page_id = 0;
         //looking for page with empty space
         while page_id < num_pages{
@@ -139,7 +140,7 @@ impl StorageTrait for StorageManager {
                         Some(slot_id) => {
                             ret_val.page_id = Some(page_id);
                             ret_val.slot_id = Some(slot_id);
-                            println!("page id and slot id are {:?} and {:?}", page_id, slot_id);
+                            println!("inserting page id and slot id are {:?} and {:?}", page_id, slot_id);
                             match heapfile.write_page_to_file(page)
                             {
                                 Ok(()) => (),
@@ -166,6 +167,7 @@ impl StorageTrait for StorageManager {
             Some(slot_id) => {
                 ret_val.slot_id = Some(slot_id);
                 ret_val.page_id = Some(num_pages);
+                println!("inserting page id and slot id are {:?} and {:?}", page_id, slot_id);
                 match heapfile.write_page_to_file(page)
                     {
                         Err(e) => panic!("can't add value"),
