@@ -94,7 +94,7 @@ impl StorageTrait for StorageManager {
     /// Create a new storage manager for testing. If this creates a temporary directory it should be cleaned up
     /// when it leaves scope.
     fn new_test_sm() -> Self {
-        let storage_path = gen_random_dir().to_string_lossy().to_string();
+        let storage_path = gen_random_dir().to_string_lossy().to_string(); 
         let new_sm = StorageManager{hf_map: Arc::new(RwLock::new(HashMap::new())), storage_path: storage_path, is_temp: true};
         new_sm
     }
@@ -167,7 +167,7 @@ impl StorageTrait for StorageManager {
             Some(slot_id) => {
                 ret_val.slot_id = Some(slot_id);
                 ret_val.page_id = Some(num_pages);
-                println!("inserting page id and slot id are {:?} and {:?}", page_id, slot_id);
+               // println!("inserting page id and slot id are {:?} and {:?}", page_id, slot_id);
                 match heapfile.write_page_to_file(page)
                     {
                         Err(e) => panic!("can't add value"),
@@ -281,7 +281,13 @@ impl StorageTrait for StorageManager {
     /// Remove the container and all stored values in the container.
     /// If the container is persisted remove the underlying files
     fn remove_container(&self, container_id: ContainerId) -> Result<(), CrustyError> {
-        panic!("TODO milestone hs");
+        let mut hfs = self.hf_map.write().unwrap();
+        let hf = hfs.get(&container_id);
+        if hf.is_none(){
+            return Err(CrustyError::CrustyError(String::from("container not there")))
+        }
+        hfs.remove(&container_id);
+        return Ok(());
     }
 
 
@@ -334,7 +340,10 @@ impl StorageTrait for StorageManager {
     /// that can be used to create a HeapFile object pointing to the same data. You don't need to
     /// worry about recreating read_count or write_count.
     fn shutdown(&self) {
-        panic!("TODO milestone hs");
+        drop(self);
+        if self.is_temp {
+            fs::remove_dir_all(&self.storage_path);
+        }  
     }
 
     fn import_csv(
