@@ -18,6 +18,7 @@ fn sm_inserts() {
         let vals1 = get_random_vec_of_byte_vec(i, 50, 100);
         let cid = i as ContainerId;
         sm.create_table(cid).unwrap();
+        println!("table with id {} created",i);
         sm.insert_values(cid, vals1.clone(), t);
         let check_vals: Vec<Vec<u8>> = sm.get_iterator(cid, t, RO).collect();
         assert!(

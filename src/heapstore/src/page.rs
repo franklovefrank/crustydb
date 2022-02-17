@@ -263,7 +263,7 @@ impl Page {
     pub fn get_value(&self, slot_id: SlotId) -> Option<Vec<u8>> {
         let entry = self.deserialize_entry(slot_id);
         if entry.is_none(){
-            return None
+            return None 
         }
         else { 
             let x = entry.unwrap();
@@ -277,7 +277,7 @@ impl Page {
     pub fn retrieve_data(&self, entry: &Entry) -> Option<Vec<u8>>  {
         //helper function to retrieve data given valid slot_id 
         let address = usize::from(entry.address);
-        let length = usize::from(entry.length); 
+        let length = usize::from(entry.length);         
         let start = address-length; 
         let mut ret : Vec<u8> = vec![0; length];
         ret.clone_from_slice(&self.data[start..address]);
