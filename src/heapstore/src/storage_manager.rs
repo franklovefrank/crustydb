@@ -130,7 +130,7 @@ impl StorageTrait for StorageManager {
         }
         let heapfile = hf.unwrap();
         let num_pages = heapfile.num_pages();
-        println!("num pages is {}", num_pages);
+        //println!("num pages is {}", num_pages);
         let mut page_id = 0;
         //looking for page with empty space
         while page_id < num_pages{
@@ -140,7 +140,7 @@ impl StorageTrait for StorageManager {
                         Some(slot_id) => {
                             ret_val.page_id = Some(page_id);
                             ret_val.slot_id = Some(slot_id);
-                            println!("inserting page id and slot id are {:?} and {:?}", page_id, slot_id);
+                            //println!("inserting page id and slot id are {:?} and {:?}", page_id, slot_id);
                             match heapfile.write_page_to_file(page)
                             {
                                 Ok(()) => (),
@@ -188,18 +188,13 @@ impl StorageTrait for StorageManager {
         values: Vec<Vec<u8>>,
         tid: TransactionId,
     ) -> Vec<ValueId> {
-        /* Initialize a new vector that will hold the ValueIds to be returned */
-        let mut value_ids = Vec::new();
-
-        /* Insert each value in the argument vector into the heapfile */
-        for i in 0..values.len()
-        {
-            /* Insert ith value and append the returned ValueId to the result vector */
-            value_ids.push(self.insert_value(container_id, values[i].clone(), tid));
+        let mut vals = Vec::new();
+        let mut i = 0;
+        while i < values.len() {
+            vals.push(self.insert_value(container_id, values[i].clone(), tid));
+            i+=1;
         }
-
-        /* Return the vector of returned value_ids */
-        return value_ids;
+        return vals;
     }
 
 
