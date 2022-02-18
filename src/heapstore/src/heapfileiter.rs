@@ -1,6 +1,7 @@
 use crate::{heapfile::HeapFile, page};
 use crate::page::PageIter;
 use common::ids::{ContainerId, PageId, TransactionId};
+use std::f32::consts::E;
 use std::sync::Arc;
 
 #[allow(dead_code)]
@@ -42,6 +43,15 @@ impl Iterator for HeapFileIterator {
     fn next(&mut self) -> Option<Self::Item> {
         let hf = self.hf.clone(); 
         let page_count = hf.num_pages();
+        // let c_page = hf.read_page_from_file(self.cur_page);
+        // match c_page {
+        //     Ok(page) =>         
+        //     {let header = page.deserialize_header();
+        //     println!("new page is page_id {}, count {}, end_free {}", header.page_id, header.count, header.end_free);
+        //    }
+        //    Err(e) => {println!("no worries")}
+        // }
+
         while self.cur_page < page_count {
             let ret = self.iter.next();
             match ret {

@@ -77,7 +77,7 @@ impl HeapFile {
             return Err(CrustyError::CrustyError(String::from("page out of range")));
         }
         let offset = pid as u64 * PAGE_SIZE as u64;
-        file.seek(SeekFrom::Start(offset + mem::size_of::<ContainerId>() as u64))?;
+        file.seek(SeekFrom::Start(offset))?;
         let mut buf = [0; PAGE_SIZE];
         let res = file.read(&mut buf);
         match res {
@@ -95,17 +95,18 @@ impl HeapFile {
         {
             self.write_count.fetch_add(1, Ordering::Relaxed);
         }
-        let mut vec = Page::get_bytes(&page);
+        let vec = Page::get_bytes(&page);
         let arr: &[u8] = &vec;
-        if self.num_pages() <= page.get_page_id() {
+        let pid = page.get_page_id();
+        if self.num_pages() <= pid {
             let mut num_pages = self.num_pages_lock.write().unwrap();
             *num_pages = *num_pages+ 1;
         } 
 
         let mut file = self.file_lock.write().unwrap();
-        let pid = page.get_page_id();
+
         let offset = pid as u64 * PAGE_SIZE as u64;
-        file.seek(SeekFrom::Start(mem::size_of::<ContainerId>() as u64 + offset))?;
+        file.seek(SeekFrom::Start(offset))?;
         let res = file.write(arr);
         match res {
             Err(e) => Err(CrustyError::CrustyError(String::from("writing error"))),

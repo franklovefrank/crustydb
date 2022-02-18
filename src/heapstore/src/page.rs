@@ -100,7 +100,7 @@ impl Page {
     pub fn deserialize_entry(&self, slotid: SlotId) -> Option<Entry> {
         let header = self.deserialize_header();
         let count = header.count; 
-        if slotid > header.count + 1 {
+        if slotid >= header.count {
             return None
         }
         else {
@@ -143,6 +143,7 @@ impl Page {
             // finding open slot 
             let open_slot = entries.entries.iter().filter(|x| x.length == 0).min_by_key(|x| x.slot_id).unwrap();
             // add new entry, shift others 
+            println!("open slot is {}", open_slot.slot_id);
             let new_entry = Entry { slot_id: open_slot.slot_id, address: open_slot.address, length:length};
             let new_entry2 = Entry { slot_id: open_slot.slot_id, address: open_slot.address, length:length};
             let updated_entries = self.shift_entries_add(new_entry);
@@ -266,9 +267,10 @@ impl Page {
         if entry.is_none(){
             return None 
         }
+        
         else { 
             let x = entry.unwrap();
-            //println!("retrieving entry, slot_id is {}, length is {}, address is {}", x.slot_id, x.length, x.address );
+          //  println!("retrieving entry, slot_id is {}, length is {}, address is {}", x.slot_id, x.length, x.address );
             if x.length == 0 {
                 return None
             };
@@ -279,7 +281,10 @@ impl Page {
     pub fn retrieve_data(&self, entry: &Entry) -> Option<Vec<u8>>  {
         //helper function to retrieve data given valid slot_id 
         let address = usize::from(entry.address);
-        let length = usize::from(entry.length);         
+        let length = usize::from(entry.length); 
+        if length == 0{
+            return None;
+        }        
         let start = address-length; 
         let mut ret : Vec<u8> = vec![0; length];
         ret.clone_from_slice(&self.data[start..address]);
@@ -297,8 +302,10 @@ impl Page {
         if slot.is_none(){
             return None
         }
-        let entry = self.deserialize_entry(slot_id).unwrap();
-        self.shift_entries_del(entry); 
+        let entry = self.deserialize_entry(slot_id);
+        let e = entry.unwrap();
+        println!("deleting entry slot_id {}, length {}", e.slot_id, e.length);
+        self.shift_entries_del(e); 
         //updating header count and reserialize
         let mut header = self.deserialize_header();
         header.open_slots = &header.open_slots + 1;
@@ -321,12 +328,15 @@ impl Page {
             }
             else if e.slot_id > slot_id {
                 // for entries to the left -> shift address and rewrite data 
-                let data = self.retrieve_data(&e).unwrap();
+                let data = self.retrieve_data(&e);
                 let address = e.address + length;
                 let new = Entry { slot_id: e.slot_id, length: e.length, address: address};
-                //writing value to new address
-                self.data[usize::from(address-length)..usize::from(address)].clone_from_slice(&data);
                 vec.push(new);
+                if data.is_some() {
+                    let d = data.unwrap();
+                    self.data[usize::from(address-length)..usize::from(address)].clone_from_slice(&d);
+                }
+                //writing value to new address
             }
             else{
                 // for entries to the right: keep it the same 
