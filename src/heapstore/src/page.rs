@@ -136,14 +136,19 @@ impl Page {
 
     pub fn new_entry(&mut self, length: u16) -> Entry{
         // find first empty slot 
+
+       // println!("new entry length {}", length);
         let mut header = self.deserialize_header();
         let mut entries = self.deserialize_entries();
         let mut entries2 = self.deserialize_entries();
+      //  println!("page id {} header open slots before new entry {}", header.page_id, header.open_slots);
         if header.open_slots != 0 {
             // finding open slot 
             let open_slot = entries.entries.iter().filter(|x| x.length == 0).min_by_key(|x| x.slot_id).unwrap();
             // add new entry, shift others 
+            if header.page_id == 0 { 
             println!("open slot is {}", open_slot.slot_id);
+            }
             let new_entry = Entry { slot_id: open_slot.slot_id, address: open_slot.address, length:length};
             let new_entry2 = Entry { slot_id: open_slot.slot_id, address: open_slot.address, length:length};
             let updated_entries = self.shift_entries_add(new_entry);
@@ -154,6 +159,7 @@ impl Page {
             header.end_free = end;
             header.open_slots -= 1; 
             self.serialize_header(&header);
+            self.serialize_entries(&updated_entries);
             return new_entry2
         }
         else {
@@ -162,8 +168,10 @@ impl Page {
             let new_entry2 = Entry { slot_id: header.count, address: header.end_free, length:length };
             entries2.entries.push(new_entry);
             //updating header 
+
             header.end_free = &header.end_free - length; 
             header.count += 1;
+            //println!("header.end_free is {}",header.end_free);
             //serializing 
             self.serialize_header(&header);
             self.serialize_entries(&entries2);
@@ -174,12 +182,15 @@ impl Page {
     pub fn shift_entries_add(&mut self, entry:Entry) -> Entries{
         let length = entry.length;
         let slot_id = entry.slot_id;
+        if self.deserialize_header().page_id == 0 { 
+            println!("add slot id shifting {}", entry.slot_id);
+            }
         let mut vec : Vec<Entry> = Vec::new(); 
         let entries = self.deserialize_entries();
         for e in entries.entries.iter(){
             if e.slot_id == slot_id {
                 //updating previous entry with slot id with new length 
-                let new = Entry { slot_id: e.slot_id, length: length, address: e.address};
+                let new = Entry { slot_id: e.slot_id, length: entry.length, address: e.address};
                 vec.push(new);
             }
             else if e.slot_id > slot_id {
@@ -239,6 +250,8 @@ impl Page {
     /// self.data[X..y].clone_from_slice(&bytes);
 
     pub fn add_value(&mut self, bytes: &[u8]) -> Option<SlotId> {
+        if self.deserialize_header().page_id == 0 {
+        }
         let max = self.get_largest_free_contiguous_space();
         let length : u16 = bytes.len().try_into().unwrap();
         if usize::from(length)  > max {
@@ -246,16 +259,22 @@ impl Page {
         }
         else {
             let header = self.deserialize_header();
-            let count = header.count; 
-            let entries = self.deserialize_entries();
-            let entries2 = self.deserialize_entries();
             //adds entry to entries, updates header count and end_free, serializes both 
             let new_entry = self.new_entry(length);
             let start_i = usize::from(new_entry.address) - usize::from(length); 
             let end_i = usize::from(new_entry.address);
             self.data[start_i..end_i].clone_from_slice(&bytes);
             let entries2 = self.deserialize_entries();
-            //println!("max is {}, length is {}, page_id is {} ", max, length, header.page_id);
+            if header.page_id == 0 {
+                println!("adding entry slot_id {}, length {}", new_entry.slot_id, new_entry.length);
+            }
+        //     if header.page_id == 0{ 
+        //     for e in entries2.entries.iter(){
+        //         println!("after insert,  entries are slot id {} length {} address {} ", e.slot_id, e.length, e.address);
+        //     }
+        
+        //     println!("done");
+        // }
             Some(new_entry.slot_id)
         }
     }
@@ -304,17 +323,31 @@ impl Page {
         }
         let entry = self.deserialize_entry(slot_id);
         let e = entry.unwrap();
-        println!("deleting entry slot_id {}, length {}", e.slot_id, e.length);
+        // if self.deserialize_header().page_id == 0 { 
+        // println!("deleting entry slot_id {}, length {}", e.slot_id, e.length);
+        // };
         self.shift_entries_del(e); 
         //updating header count and reserialize
         let mut header = self.deserialize_header();
         header.open_slots = &header.open_slots + 1;
         self.serialize_header(&header);
+        let entries = self.deserialize_entries();
+        let page_id = header.page_id;
+        // if page_id == 0 { 
+        //     for e in entries.entries.iter(){
+        //         println!("after del, entries are slot id {} length {} address {} ", e.slot_id, e.length, e.address);
+        //     }
+        //     println!("done");
+        // }
+
         Some(())
     }
 
     pub fn shift_entries_del(&mut self, entry: Entry){
         // getting info about entry to be deleted 
+        if self.deserialize_header().page_id == 0 { 
+            println!("del slot id shifting {}", entry.slot_id);
+            }
         let length = entry.length;
         let slot_id = entry.slot_id;
         // return vec
@@ -334,7 +367,8 @@ impl Page {
                 vec.push(new);
                 if data.is_some() {
                     let d = data.unwrap();
-                    self.data[usize::from(address-length)..usize::from(address)].clone_from_slice(&d);
+                    self.data[usize::from(address-e.length)..usize::from(e.address + length)].clone_from_slice(&d);
+                    // e.address .. e.address + length
                 }
                 //writing value to new address
             }
@@ -819,7 +853,6 @@ mod tests {
         //Check another way
         let p = Page::from_bytes(&page_bytes);
         assert_eq!(Some(tuple_bytes.clone()), p.get_value(0));
-        println!("line 826");
 
         for (i, x) in p.into_iter().enumerate() {
             assert_eq!(tup_vec[i], x);

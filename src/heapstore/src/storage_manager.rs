@@ -140,9 +140,9 @@ impl StorageTrait for StorageManager {
                   //  println!("page id {}, end_free{}, count {}", header.page_id, header.end_free, header.count);
                     match page.add_value(&value){ 
                         Some(slot_id) => {
+                          //  println!("add value worked, slotid {} ", slot_id);
                             ret_val.page_id = Some(page_id);
                             ret_val.slot_id = Some(slot_id);
-                         //  println!("1 inserting page id and slot id are {:?} and {:?}", page_id, slot_id);
                             match heapfile.write_page_to_file(page)
                             {
                                 Ok(()) => (),
@@ -170,7 +170,6 @@ impl StorageTrait for StorageManager {
             Some(slot_id) => {
                 ret_val.slot_id = Some(slot_id);
                 ret_val.page_id = Some(num_pages);
-              // println!("2 inserting page id and slot id are {:?} and {:?}", page_id, slot_id);
                 match heapfile.write_page_to_file(page)
                     {
                         Err(e) => panic!("can't add value"),
@@ -197,7 +196,6 @@ impl StorageTrait for StorageManager {
             vals.push(self.insert_value(container_id, values[i].clone(), tid));
             i+=1;
         }
-        println!("length of vals is {}", vals.len());
         return vals;
     }
 
@@ -218,9 +216,11 @@ impl StorageTrait for StorageManager {
         {
             Err(error) => Err(CrustyError::CrustyError(String::from("couldn't read"))),
             Ok(mut page) => {
-                println!("slot id {} is being deleted, page_id is {} container_id is {}", id.slot_id.unwrap(),id.page_id.unwrap(),id.container_id );
+                if id.page_id.unwrap() == 0 { 
+                println!("slot id {} is being deleted", id.slot_id.unwrap());
+                }
                 page.delete_value(id.slot_id.unwrap());
-                println!("new page end_free is {}, open slots is {}", page.deserialize_header().end_free, page.deserialize_header().open_slots);
+               // println!("new page end_free is {}, open slots is {}", page.deserialize_header().end_free, page.deserialize_header().open_slots);
                 match hf.unwrap().write_page_to_file(page)
                 {
                     Err(e) => return Err(CrustyError::CrustyError(String::from("couldn't update"))),
@@ -240,7 +240,16 @@ impl StorageTrait for StorageManager {
         id: ValueId,
         _tid: TransactionId,
     ) -> Result<ValueId, CrustyError> {
-        panic!("fuck this");
+        match self.delete_value(id, _tid)
+        {
+            Ok(()) => {
+                if id.page_id.unwrap() == 0 { 
+                println!("rebound insert value {}", id.slot_id.unwrap());
+                }
+                return Ok(self.insert_value(id.container_id, value, _tid));
+            }
+            Err(error) => return Err(error)
+        }
     }
 
     /// Create a new container to be stored. 
