@@ -20,6 +20,7 @@ struct Aggregator {
     groupby_fields: Vec<usize>,
     /// Schema of the output.
     schema: TableSchema,
+    ht: HashMap<Vec<Field>, Vec<Vec<Field>>>,
 }
 
 impl Aggregator {
@@ -35,7 +36,12 @@ impl Aggregator {
         groupby_fields: Vec<usize>,
         schema: &TableSchema,
     ) -> Self {
-        panic!("TODO milestone op");
+        Self {
+            agg_fields: agg_fields,
+            groupby_fields: groupby_fields,
+            schema: schema.clone(),
+            ht: HashMap::new(),
+        }
     }
 
 
@@ -48,31 +54,102 @@ impl Aggregator {
     ///
     /// * `tuple` - Tuple to add to a group.
     pub fn merge_tuple_into_group(&mut self, tuple: &Tuple) {
-        panic!("TODO milestone op");
+        let mut a_fields = Vec::new();
+        let agg_iter = self.agg_fields.iter();
+        for i in agg_iter {
+            let item = tuple.get_field(i.field).unwrap().clone();
+            a_fields.push(item);
+        }
+
+        let mut gb_fields = Vec::new();
+        let gb_iter = self.groupby_fields.iter();
+        for i in gb_iter {
+            let item = tuple.get_field(*i).unwrap().clone();
+            gb_fields.push(item);
+        }
+        
+        let temp = Vec::new();
+
+        self.ht
+            .entry(gb_fields)
+            .or_insert(temp)
+            .push(a_fields);
     }
 
     /// Returns a `TupleIterator` over the results.
     ///
     /// Resulting tuples must be of the form: (group by fields ..., aggregate fields ...)
     pub fn iterator(&self) -> TupleIterator {
-        panic!("TODO milestone op");
+        let mut temp = Vec::new();
+        for (gb_fields, a_tuples) in self.ht.iter() {
+            let af = a_tuples.clone();
+            let mut afs = Vec::new();
+
+            for (i, agg) in self.agg_fields.iter().enumerate() {
+                let mut col = Vec::new();
+                for tuple in af.iter() {
+                    col.push(tuple[i].clone());
+                }
+                match agg.op {
+                    AggOp::Sum => {
+                        let mut sum = 0;
+                        for field in col {
+                            let add = field.unwrap_int_field();
+                            sum += add;
+                        }
+                        let res_f = Field::IntField(sum);
+                        afs.push(res_f);
+                    },
+                    AggOp::Min => {
+                        let iter = col.iter();
+                        let min = iter.min();
+                        let res = min.unwrap().clone();
+                        afs.push(res);     
+                    },
+                    AggOp::Max => {
+                        let iter = col.iter();
+                        let max = iter.max();
+                        let res = max.unwrap().clone();
+                        afs.push(res);     
+                    },
+                    AggOp::Avg => {
+                        let mut sum = 0;
+                        let col_iter = col.iter();
+                        for field in col_iter {
+                            let add = field.unwrap_int_field();
+                            sum += add;
+                        }
+                        let res = sum / col.len() as i32;
+                        let f_res = Field::IntField(res);
+                        afs.push(f_res);
+                    }
+                    AggOp::Count => {
+                        let res = col.len() as i32;
+                        let f_res = Field::IntField(res);
+                        afs.push(f_res);
+                    },
+                }
+            }
+            let mut fs = gb_fields.clone();
+            fs.extend(afs);
+            let tuple = Tuple::new(fs);
+            temp.push(tuple);
+        }
+        let schema_clone = self.schema.clone();
+        let ret = TupleIterator::new(temp, schema_clone);
+        return ret;
     }
+
 }
 
 /// Aggregate operator. (You can add any other fields that you think are neccessary)
 pub struct Aggregate {
-    /// Fields to groupby over.
-    groupby_fields: Vec<usize>,
-    /// Aggregation fields and corresponding aggregation functions.
-    agg_fields: Vec<AggregateField>,
-    /// Aggregation iterators for results.
-    agg_iter: Option<TupleIterator>,
-    /// Output schema of the form [groupby_field attributes ..., agg_field attributes ...]).
+     /// Resulting schema.
     schema: TableSchema,
     /// Boolean if the iterator is open.
     open: bool,
-    /// Child operator to get the data from.
-    child: Box<dyn OpIterator>,
+    /// Tuple iterator
+    t_iterator: TupleIterator,
 }
 
 impl Aggregate {
@@ -94,26 +171,121 @@ impl Aggregate {
         ops: Vec<AggOp>,
         child: Box<dyn OpIterator>,
     ) -> Self {
-        panic!("TODO milestone op");
+        let mut data_types = Vec::new();
+        let schema = child.get_schema();
+        
+        let op_iter = ops.iter();
+        let agg_iter = agg_indices.iter();
+        let zipped = op_iter.zip(agg_iter);
+        let mut agg_fields = Vec::new();
+
+        for (op, i) in zipped {
+            let new = AggregateField{ op: op.clone(), field:i.clone()};
+            agg_fields.push(new);
+            match op {
+                AggOp::Count => {
+                let dt = DataType::Int;
+                data_types.push(dt);
+                }
+                _ => {
+                    let attr = schema.get_attribute(*i);
+                    let a_type = attr.unwrap().dtype().clone();
+                    data_types.push(a_type);
+                }
+            }
+        }
+
+        let gb_iter = groupby_indices.iter();
+
+        for i in gb_iter {
+            let attribute = schema.get_attribute(*i);
+            let res = attribute.unwrap().dtype().clone();
+            data_types.push(res);
+        }
+
+        let mut gbnames = groupby_names.clone();
+        let agg_clone = agg_names.clone();
+        gbnames.extend(agg_clone);
+        let res_schema = TableSchema::from_vecs(gbnames, data_types);
+
+        let aggregator = Aggregator::new(agg_fields, groupby_indices, &res_schema);
+        let agg_iterator = aggregator.iterator();
+
+        let mut new = Aggregate {
+            schema: res_schema,
+            open: false,
+            t_iterator: agg_iterator
+        };
+        let res  = new.helper(aggregator, child);
+        match res {
+            Ok(()) => new,
+            Err(e)=> panic!("something went wrong")
+        }
+    }
+
+    fn helper(
+        &mut self,
+        mut agg: Aggregator,
+        mut child: Box<dyn OpIterator>,
+    ) -> Result<(), CrustyError> {
+        let open = child.open();
+        match open {
+            Err(e) => return Err(CrustyError::CrustyError(String::from("error in helper"))),
+            Ok(()) => {
+                while let Some(t) = child.next()? {
+                    agg.merge_tuple_into_group(&t);
+                }
+                self.t_iterator = agg.iterator();
+                let res = child.close();
+                match res {
+                    Ok(()) => Ok(()),
+                    Err(e)=> Err(CrustyError::CrustyError(String::from("error in helper")))
+                }
+            }
+        }
     }
 
 }
 
 impl OpIterator for Aggregate {
     fn open(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        self.open = true;
+        return self.t_iterator.open();
     }
 
     fn next(&mut self) -> Result<Option<Tuple>, CrustyError> {
-        panic!("TODO milestone op");
+        if self.open {
+            return self.t_iterator.next();
+        }
+        else {
+            return Err(CrustyError::CrustyError(String::from("op hasn't been opened yet")))
+        }
     }
 
     fn close(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        self.open = false;
+        let res = self.t_iterator.close();
+        match res {
+            Ok(()) => return Ok(()),
+            Err(e) => return Err(CrustyError::CrustyError(String::from("couldn't close"))),
+        }
     }
 
     fn rewind(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        if !self.open {
+            return Err(CrustyError::CrustyError(String::from("op hasn't been opened yet")));
+        }
+        let rewind = self.t_iterator.rewind();
+        match rewind {
+            Ok(()) => {
+                let close = self.close();
+                match close {
+                    Ok(()) => return self.open(),
+                    Err(e) => return Err(CrustyError::CrustyError(String::from("couldn't close")))
+                }
+            }
+            Err(e) => return Err(CrustyError::CrustyError(String::from("couldn't rewind")))
+        }
     }
 
     fn get_schema(&self) -> &TableSchema {

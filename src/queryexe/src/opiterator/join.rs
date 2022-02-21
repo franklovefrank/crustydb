@@ -3,6 +3,7 @@ use common::{CrustyError, Field, SimplePredicateOp, TableSchema, Tuple};
 use std::collections::HashMap;
 
 /// Compares the fields of two tuples using a predicate. (You can add any other fields that you think are neccessary)
+/// all variable names still the same 
 pub struct JoinPredicate {
     /// Operation to comapre the fields with.
     op: SimplePredicateOp,
@@ -10,6 +11,7 @@ pub struct JoinPredicate {
     left_index: usize,
     /// Index of the field of the right table (tuple).
     right_index: usize,
+    curr_left_tuple: Option<Tuple>
 }
 
 
@@ -22,7 +24,20 @@ impl JoinPredicate {
     /// * `left_index` - Index of the field to compare in the left tuple.
     /// * `right_index` - Index of the field to compare in the right tuple.
     fn new(op: SimplePredicateOp, left_index: usize, right_index: usize) -> Self {
-        panic!("TODO milestone op");
+            JoinPredicate {
+                op: op,
+                left_index: left_index,
+                right_index: right_index,
+                curr_left_tuple: None,
+            }
+    }
+
+    fn compare_left_right(&self, right_tuple: &Tuple) -> bool {
+        let right_field = right_tuple.get_field(self.right_index).unwrap();
+        let left_tuple = self.curr_left_tuple.as_ref().unwrap();
+        let left_field = left_tuple.get_field(self.left_index).unwrap();
+
+        self.op.compare(left_field, right_field)
     }
 }
 
@@ -32,11 +47,13 @@ pub struct Join {
     /// Join condition.
     predicate: JoinPredicate,
     /// Left child node.
-    left_child: Box<dyn OpIterator>,
+    left: Box<dyn OpIterator>,
     /// Right child node.
-    right_child: Box<dyn OpIterator>,
+    right: Box<dyn OpIterator>,
     /// Schema of the result.
     schema: TableSchema,
+    open: bool,
+    first: bool
 }
 
 impl Join {
@@ -56,26 +73,115 @@ impl Join {
         left_child: Box<dyn OpIterator>,
         right_child: Box<dyn OpIterator>,
     ) -> Self {
-        panic!("TODO milestone op");
+        let jp = JoinPredicate::new(op,left_index,right_index);
+        let rs_schema = right_child.get_schema();
+        let mut new = Join {
+            predicate: jp,
+            schema: left_child
+                .get_schema()
+                .clone()
+                .merge(&rs_schema)
+                .clone(),
+            left: left_child,
+            right: right_child,
+            open: false,
+            first: true,
+        };
+        let open = new.left.open();
+        let next = new.left.next().unwrap();
+        new.predicate.curr_left_tuple = next;
+        let rewind = new.left.rewind();
+        let close = new.left.close();
+        return new;
     }
 }
 
 impl OpIterator for Join {
     fn open(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        self.open = true;
+        match (self.left.open(), self.right.open()) {
+            (Ok(()), Ok(())) => {
+                Ok(())
+            }
+            _ => {
+                Err(CrustyError::CrustyError(String::from("can't open children")))
+            }
+        }
     }
 
     /// Calculates the next tuple for a nested loop join.
     fn next(&mut self) -> Result<Option<Tuple>, CrustyError> {
-        panic!("TODO milestone op");
+        if self.open {
+            while let Some(left_t) = self.predicate.curr_left_tuple.as_ref() {
+                while let Some(t) = self.right.next()? {
+                    let res = self.predicate.compare_left_right(&t);
+                    if res {
+                        return Ok(Some(left_t.merge(&t)));
+                    }
+                }
+                if self.first {
+                    self.first = false;
+                    self.left.next()?;
+                }
+                // update curr_left_tuple and rewind right child
+                match self.left.next()? {
+                    Some(left_t) => {
+                        self.right.rewind()?;
+                        self.predicate.curr_left_tuple = Some(left_t);
+                    }
+                    None => {
+                        return Ok(None);
+                    }
+                }
+            }
+            return Err(CrustyError::CrustyError(String::from("next failed")))
+        }
+        else {
+            return Err(CrustyError::CrustyError(String::from("self isn't opened")))
+        }
+
     }
 
     fn close(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        self.open = false;
+        let right = self.right.close();
+        match right {
+            Ok(()) => {
+                let left = self.left.close();
+                match left {
+                    Ok(()) => Ok(()),
+                    Err(e) => return Err(CrustyError::CrustyError(String::from("error on left close")))
+                }
+            },
+            Err(e) => return Err(CrustyError::CrustyError(String::from("error on right close")))
+        }
     }
 
     fn rewind(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        if self.open {
+            let left = self.left.rewind();
+            match left {
+                Ok(()) => {
+                    let right = self.right.rewind();
+                    match right {
+                        Ok(()) => {
+                            let close = self.close();
+                            match close {
+                                Ok(()) => self.open(),
+                                Err(e) => return Err(CrustyError::CrustyError(String::from("error on close")))
+                            }
+                        }
+                        Err(e) => return Err(CrustyError::CrustyError(String::from("error on right rewind")))
+                    }
+                },
+                Err(e) => return Err(CrustyError::CrustyError(String::from("error on left rewind")))
+            }
+
+        }
+        else {
+            return Err(CrustyError::CrustyError(String::from("op hasn't been opened")))
+        }
+
     }
 
     /// return schema of the result
@@ -86,12 +192,15 @@ impl OpIterator for Join {
 
 /// Hash equi-join implementation. (You can add any other fields that you think are neccessary)
 pub struct HashEqJoin {
-    predicate: JoinPredicate,
-   
-    left_child: Box<dyn OpIterator>,
-    right_child: Box<dyn OpIterator>,
+    left: Box<dyn OpIterator>,
+    right: Box<dyn OpIterator>,
 
     schema: TableSchema,
+    hash_table: HashMap<Field, (Vec<Tuple>, usize)>, //vector of tuples
+    /// Boolean determining if iterator is open.
+    open: bool,
+    right_index: usize,
+    left_index: usize
 }
 
 impl HashEqJoin {
@@ -112,25 +221,102 @@ impl HashEqJoin {
         left_child: Box<dyn OpIterator>,
         right_child: Box<dyn OpIterator>,
     ) -> Self {
-        panic!("TODO milestone op");
+        let mut new = HashEqJoin {
+            schema: left_child
+                .get_schema()
+                .clone()
+                .merge(&right_child.get_schema())
+                .clone(),
+            left: left_child,
+            right: right_child,
+            right_index: right_index,
+            left_index: left_index,
+            open: false,
+            hash_table: HashMap::new(),
+        };
+        new.load_map();
+        new
+    }
+
+    //still this
+
+    pub fn load_map(&mut self) -> Result<(), CrustyError> {
+        let open = self.open();
+        match open {
+            Ok(()) => {
+                while let Some(left_t) = self.left.next()? {
+                    let left_field = left_t.get_field(self.left_index).unwrap();
+                    let (ref mut vec, _) = self
+                        .hash_table
+                        .entry(left_field.clone())
+                        .or_insert((Vec::new(), 0));
+                    vec.push(left_t.clone());
+                }
+                return self.close();
+            },
+            Err(e) => return Err(CrustyError::CrustyError("open children failed".to_string()))
+        }
     }
 }
 
 impl OpIterator for HashEqJoin {
     fn open(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        self.open = true;
+        match (self.left.open(), self.right.open()) {
+            (Ok(_), Ok(_)) => {
+                return Ok(());
+            }
+            _ => {
+                return Err(CrustyError::CrustyError("open children failed".to_string()));
+            }
+        }
     }
 
     fn next(&mut self) -> Result<Option<Tuple>, CrustyError> {
-        panic!("TODO milestone op");
+        while let Some(right_t) = self.right.next()? {
+            match self.hash_table.get_mut(right_t.get_field(self.right_index).unwrap()) {
+                Some((vec, i)) => {
+                    if *i >= vec.len(){
+                        *i = 0;
+                    }
+                    else {
+                        let ret = Some(vec[*i].merge(&right_t));
+                        *i += 1;
+                        return Ok(ret);
+                    } 
+                }
+                None => {}
+            }
+        }
+        return Ok(None);
     }
 
     fn close(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        self.open = false;
+        let right = self.right.close();
+        match right {
+            Ok(()) => {
+                let left = self.left.close();
+                match left {
+                    Ok(()) => Ok(()),
+                    Err(e) => return Err(CrustyError::CrustyError(String::from("error on left close")))
+                }
+            },
+            Err(e) => return Err(CrustyError::CrustyError(String::from("error on right close")))
+        }
     }
 
     fn rewind(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        if self.open {
+            self.left.rewind()?;
+            self.right.rewind()?;
+            self.load_map()?;
+            self.close()?;
+            return self.open();
+        }
+        else {
+            return Err(CrustyError::CrustyError(String::from("wasn't open")))
+        }
     }
 
     fn get_schema(&self) -> &TableSchema {
