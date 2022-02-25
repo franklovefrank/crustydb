@@ -238,7 +238,6 @@ impl HashEqJoin {
         new
     }
 
-    //still this
 
     pub fn load_map(&mut self) -> Result<(), CrustyError> {
         let open = self.open();
