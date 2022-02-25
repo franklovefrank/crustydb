@@ -43,7 +43,8 @@ impl Header{
 }
 
 
-pub(crate) struct Page {
+#[derive(Clone)]
+pub struct Page {
     /// The data for page 
     data: [u8; PAGE_SIZE],
 }
@@ -147,7 +148,7 @@ impl Page {
             let open_slot = entries.entries.iter().filter(|x| x.length == 0).min_by_key(|x| x.slot_id).unwrap();
             // add new entry, shift others 
             if header.page_id == 0 { 
-            println!("open slot is {}", open_slot.slot_id);
+            //println!("open slot is {}", open_slot.slot_id);
             }
             let new_entry = Entry { slot_id: open_slot.slot_id, address: open_slot.address, length:length};
             let new_entry2 = Entry { slot_id: open_slot.slot_id, address: open_slot.address, length:length};
@@ -182,9 +183,9 @@ impl Page {
     pub fn shift_entries_add(&mut self, entry:Entry) -> Entries{
         let length = entry.length;
         let slot_id = entry.slot_id;
-        if self.deserialize_header().page_id == 0 { 
-            println!("add slot id shifting {}", entry.slot_id);
-            }
+        // if self.deserialize_header().page_id == 0 { 
+        //     //!("add slot id shifting {}", entry.slot_id);
+        //     }
         let mut vec : Vec<Entry> = Vec::new(); 
         let entries = self.deserialize_entries();
         for e in entries.entries.iter(){
@@ -266,7 +267,7 @@ impl Page {
             self.data[start_i..end_i].clone_from_slice(&bytes);
             let entries2 = self.deserialize_entries();
             if header.page_id == 0 {
-                println!("adding entry slot_id {}, length {}", new_entry.slot_id, new_entry.length);
+             //   println!("adding entry slot_id {}, length {}", new_entry.slot_id, new_entry.length);
             }
         //     if header.page_id == 0{ 
         //     for e in entries2.entries.iter(){
@@ -346,7 +347,7 @@ impl Page {
     pub fn shift_entries_del(&mut self, entry: Entry){
         // getting info about entry to be deleted 
         if self.deserialize_header().page_id == 0 { 
-            println!("del slot id shifting {}", entry.slot_id);
+           // println!("del slot id shifting {}", entry.slot_id);
             }
         let length = entry.length;
         let slot_id = entry.slot_id;

@@ -1,14 +1,11 @@
 use crate::page::Page;
 use common::ids::PageId;
-use common::ids::ContainerId;
 use common::{CrustyError, PAGE_SIZE};
 use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, RwLock};
-use std::mem;
-use std::io::BufWriter;
 use std::io::{Seek, SeekFrom};
 
 /// The struct for a heap file.  
@@ -26,8 +23,8 @@ pub(crate) struct HeapFile {
     // The following are for profiling/ correctness checks
     pub read_count: AtomicU16,
     pub write_count: AtomicU16,
-    file_lock: RwLock<File>,
-    pub num_pages_lock: RwLock<PageId>
+    empty_space: Arc<RwLock<Vec<usize>>>, 
+    f_lock: Arc<RwLock<File>>,
 }
 
 /// HeapFile required functions
@@ -46,21 +43,38 @@ impl HeapFile {
                 return Err(CrustyError::CrustyError(String::from("could not open file")));
             }
         };
-
-        Ok(HeapFile {
+        let new = HeapFile {
             read_count: AtomicU16::new(0),
             write_count: AtomicU16::new(0),
-            file_lock: RwLock::new(file),
-            num_pages_lock: RwLock::new(0),
-        })
+            f_lock: Arc::new(RwLock::new(file)),
+            empty_space: Arc::new(RwLock::new(Vec::new())),
+        };
+        return Ok(new);
     }
 
     /// Return the number of pages for this HeapFile.
     /// Return type is PageId (alias for another type) as we cannot have more
     /// pages than PageId can hold.
     pub fn num_pages(&self) -> PageId {
-        let num_pages = self.num_pages_lock.read().unwrap();
-        return num_pages.clone();
+        let file = self.f_lock.read();
+        let metadata = file.unwrap().metadata().unwrap();
+        let len = metadata.len();
+        let ret : PageId = (len / PAGE_SIZE as u64).try_into().unwrap();
+        return ret;
+    }
+
+    pub fn find_pages_to_insert(&self, len: usize) -> Vec<PageId> {
+        let mut page_ids = Vec::new();
+        let empty_space = self.empty_space.read().unwrap();
+        let e_iter = empty_space.iter().enumerate();
+
+        for (i, &empty_len) in e_iter{
+            let comp = len + 6;
+            if empty_len >= comp {
+                page_ids.push(i as PageId);
+            }
+        }
+        return page_ids;
     }
 
     /// Read the page from the file.
@@ -71,20 +85,19 @@ impl HeapFile {
         {
             self.read_count.fetch_add(1, Ordering::Relaxed);
         }
-        let mut file = self.file_lock.write().unwrap();
-        if usize::from(pid) > usize::from(self.num_pages()) - 1
-        {
-            return Err(CrustyError::CrustyError(String::from("page out of range")));
+        let page_num: usize = usize::from(self.num_pages());
+        let p = usize::from(pid);
+        if p < page_num {
+            let mut file = self.f_lock.write().unwrap();
+            let mut page_buffer = [0; 4096];
+            let index = PAGE_SIZE * pid as usize;
+            file.seek(SeekFrom::Start(index.try_into().unwrap()))?;
+            file.read(&mut page_buffer[..])?;
+            Ok(Page::from_bytes(&page_buffer))
         }
-        let offset = pid as u64 * PAGE_SIZE as u64;
-        file.seek(SeekFrom::Start(offset))?;
-        let mut buf = [0; PAGE_SIZE];
-        let res = file.read(&mut buf);
-        match res {
-            Err(e) => Err(CrustyError::CrustyError(String::from("reading error"))),
-            Ok(f) =>  Ok(Page::from_bytes(&buf))
+        else {
+            return Err(CrustyError::CrustyError("invalid pageID".to_string()));
         }
-
     }
 
     /// Take a page and write it to the underlying file.
@@ -95,24 +108,48 @@ impl HeapFile {
         {
             self.write_count.fetch_add(1, Ordering::Relaxed);
         }
-        let vec = Page::get_bytes(&page);
-        let arr: &[u8] = &vec;
-        let pid = page.get_page_id();
-        if self.num_pages() <= pid {
-            let mut num_pages = self.num_pages_lock.write().unwrap();
-            *num_pages = *num_pages+ 1;
-        } 
+        let page_num: usize = self.num_pages().into();
+        let mut file = self.f_lock.write().unwrap();
 
-        let mut file = self.file_lock.write().unwrap();
+        let p_id = page.get_page_id();
+        if p_id as usize >= page_num {
+            let seek  = file.seek(SeekFrom::End(0));
+            match seek {
+                Ok(_) => {
+                    match file.write(&page.get_bytes()) {
+                        Ok(_) => {
+                            let free = page.get_largest_free_contiguous_space();
+                            let mut empty_space = self.empty_space.write().unwrap();
+                            empty_space.push(free);
+                            return Ok(());
+                        }
+                        Err(e) => return Err(CrustyError::IOError("write error".to_string())) 
+                    }
+                }
+                Err(e) =>  return Err(CrustyError::IOError("seek error".to_string()))
+            }
+        }
 
-        let offset = pid as u64 * PAGE_SIZE as u64;
-        file.seek(SeekFrom::Start(offset))?;
-        let res = file.write(arr);
-        match res {
-            Err(e) => Err(CrustyError::CrustyError(String::from("writing error"))),
-            Ok(f) => Ok(())
+       let seek = file.seek(SeekFrom::Start(
+            (PAGE_SIZE * p_id as usize).try_into().unwrap(),
+        ));
+        match seek {
+            Err(e) => return Err(CrustyError::IOError("seek error".to_string())),
+            Ok(_) => {
+                match file.write(&page.get_bytes()) {
+                    Err(e) => {
+                        return Err(CrustyError::IOError("write error".to_string()));
+                    },
+                    Ok(_) => {
+                        let mut empty_space = self.empty_space.write().unwrap();
+                        empty_space[p_id as usize] = page.get_largest_free_contiguous_space();
+                        return Ok(());
+                    }
+                }
+            }
         }
     }
+
 
 }
 

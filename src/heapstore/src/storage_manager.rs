@@ -1,6 +1,7 @@
 use crate::heapfile::HeapFile;
 use crate::heapfileiter::HeapFileIterator;
 use crate::page::Page;
+use crate::buffer_pool::BufferPool;
 use common::prelude::*;
 use common::storage_trait::StorageTrait;
 use common::testutil::gen_random_dir;
@@ -8,15 +9,16 @@ use common::PAGE_SIZE;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{PathBuf, Path};
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
 
 
 /// The StorageManager struct
 pub struct StorageManager {
-    pub storage_path: String,
+    pub s_path: String,
+    indices: Arc<RwLock<HashMap<ContainerId, usize>>>,
+    hfs: Arc<RwLock<Vec<Arc<HeapFile>>>>,
+    bp: Arc<RwLock<BufferPool>>,
     is_temp: bool,
-    hf_map: Arc<RwLock<HashMap<ContainerId, Arc<HeapFile>>>>
 }
 
 /// The required functions in HeapStore's StorageManager that are specific for HeapFiles
@@ -30,15 +32,41 @@ impl StorageManager {
         _perm: Permissions,
         _pin: bool,
     ) -> Option<Page> {
-        /* Get a pointer to the heapfiles vector */
-        let heapfiles = self.hf_map.read().unwrap().clone();
-        if heapfiles.contains_key(&container_id){
-            let heapfile = heapfiles[&container_id].clone();
-            let ret_page = HeapFile::read_page_from_file(&heapfile, page_id);
-            Some(ret_page.unwrap())
-        } else {
-            None
-        }    
+        // helper function that omits optional variables
+        self.get_page_helper(container_id, page_id)
+    }
+
+    pub(crate) fn get_page_helper(
+        &self,
+        container_id: ContainerId,
+        page_id: PageId,
+    ) -> Option<Page> {
+        let mut bp = self.bp.write().unwrap();
+        let res = bp.get_page(container_id, page_id);
+        if res.is_none(){
+            let indices = self.indices.read().unwrap();
+            let heapfiles = self.hfs.write().unwrap();
+            let index = indices.get(&container_id);
+            if index.is_none(){
+                return None;
+            }
+            else{
+                let idx = index.unwrap();
+                match heapfiles[*idx].read_page_from_file(page_id) {
+                    Ok(page) => {
+                        bp.insert_page(&page, container_id);
+                        return Some(page);
+                    }
+                    Err(_) => {
+                        return None;
+                    }
+                }
+            }
+        }
+        else{
+            let page= res.unwrap();
+            return Some(page)
+        }
     }
 
     /// Write a page
@@ -48,29 +76,44 @@ impl StorageManager {
         page: Page,
         _tid: TransactionId,
     ) -> Result<(), CrustyError> {
-        /* Get a pointer to the heapfiles vector */
-        let heapfiles = self.hf_map.read().unwrap().clone();
-        let hf = heapfiles.get(&container_id);
-        if hf.is_none(){
-            return Err(CrustyError::CrustyError(String::from("write_page: could not write page to file")));
+        self.write_page_helper(container_id, page)
+    }
+
+    //helper function for write page 
+    pub(crate) fn write_page_helper(
+        &self,
+        container_id: ContainerId,
+        page: Page,
+    ) -> Result<(), CrustyError> {
+        let indices = self.indices.read().unwrap();
+        let res = indices.get(&container_id);
+        if res.is_none(){
+            return Err(CrustyError::CrustyError("container id invalid".to_string()));
         }
-        let res = hf.unwrap();
-        match res.write_page_to_file(page) { 
-            Ok(()) => Ok(()),
-            Err(_e) => Err(CrustyError::CrustyError(String::from("write_page: could not write page to file")))
+        else {
+            let idx = res.unwrap();
+            let mut bp = self.bp.write().unwrap();
+            bp.write_page(&page, container_id);
+            let heapfiles = self.hfs.write().unwrap();
+            let ret = heapfiles[*idx].write_page_to_file(page);
+            return ret;
         }
+
     }
 
     /// Get the number of pages for a container
     fn get_num_pages(&self, container_id: ContainerId) -> PageId {
-        let heapfiles = self.hf_map.read().unwrap().clone();
-        let hf = heapfiles.get(&container_id);
-        if hf.is_none(){
-            panic!("container file does not exist");
+        let indices = self.indices.read().unwrap();
+        let ret = indices.get(&container_id);
+        if ret.is_none(){
+            panic!("containerid {} is invalid", container_id);
         }
-        let ret = hf.unwrap().clone();
-        let num_pages = HeapFile::num_pages(&ret);
-        return num_pages;
+        else {
+            let idx = ret.unwrap();
+            let heapfiles = self.hfs.write().unwrap();
+            let ret = heapfiles[*idx].num_pages();
+            return ret;
+        }
     }
 
 
@@ -89,14 +132,41 @@ impl StorageTrait for StorageManager {
     /// Create a new storage manager that will use storage_path as the location to persist data
     /// (if the storage manager persists records on disk)
     fn new(storage_path: String) -> Self {
-        StorageManager{hf_map: Arc::new(RwLock::new(HashMap::new())), storage_path: storage_path, is_temp: false}
+        let create = fs::create_dir(&storage_path);
+        match create {
+            Ok(()) => {
+                let ret =        
+                 StorageManager {
+                    s_path: storage_path,
+                    indices: Arc::new(RwLock::new(HashMap::new())),
+                    hfs: Arc::new(RwLock::new(Vec::new())),
+                    bp: Arc::new(RwLock::new(BufferPool::new())),
+                    is_temp: false,
+                };
+                return ret;
+            },
+            Err(e)=> panic!("create dir didn't work")
+        }
+
     }
     /// Create a new storage manager for testing. If this creates a temporary directory it should be cleaned up
     /// when it leaves scope.
     fn new_test_sm() -> Self {
-        let storage_path = gen_random_dir().to_string_lossy().to_string(); 
-        let new_sm = StorageManager{hf_map: Arc::new(RwLock::new(HashMap::new())), storage_path: storage_path, is_temp: true};
-        new_sm
+        let storage_path = gen_random_dir().to_string_lossy().to_string();
+        let create = fs::create_dir(&storage_path);
+        match create {
+            Err(e)=> panic!("create dir didn't work"),
+            Ok(()) => {
+                let ret =         StorageManager {
+                    s_path: storage_path,
+                    indices: Arc::new(RwLock::new(HashMap::new())),
+                    hfs: Arc::new(RwLock::new(Vec::new())),
+                    bp: Arc::new(RwLock::new(BufferPool::new())),
+                    is_temp: true,
+                };
+                return ret;
+            }
+        }
     }
 
     fn get_simple_config() -> common::ContainerConfig {
@@ -109,77 +179,82 @@ impl StorageTrait for StorageManager {
         value: Vec<u8>,
         tid: TransactionId,
     ) -> ValueId {
-        /* Panic if value contains more than PAGE_SIZE bytes */
         if value.len() > PAGE_SIZE {
             panic!("Cannot handle inserting a value larger than the page size");
         }
-    
-        // eventually going to return after modifying 
-        let mut ret_val = ValueId {
-            container_id: container_id,
-            segment_id: None,
-            page_id: None,
-            slot_id: None
-        };
 
-        // getting heap file
-        let map = self.hf_map.read().unwrap().clone();
-        let hf = map.get(&container_id);
-        if hf.is_none(){
-            panic!("heapfile doesn't exist")
+        let mut buffer_pool = self.bp.write().unwrap();
+        let indices = self.indices.read().unwrap();
+        let mut value_id = ValueId::new(container_id);
+        let heapfiles = self.hfs.write().unwrap();
+        let ret =  indices.get(&container_id);
+        if ret.is_none(){
+            panic!("containerID {} is invalid", container_id);
         }
-        let heapfile = hf.unwrap();
-        let num_pages = heapfile.num_pages();
-        //println!("num pages is {}", num_pages);
-        let mut page_id = 0;
-        //looking for page with empty space
-        while page_id < num_pages{
-            match heapfile.read_page_from_file(page_id){ 
-                Ok(mut page) => {
-                    let header = page.deserialize_header();
-                  //  println!("page id {}, end_free{}, count {}", header.page_id, header.end_free, header.count);
-                    match page.add_value(&value){ 
-                        Some(slot_id) => {
-                          //  println!("add value worked, slotid {} ", slot_id);
-                            ret_val.page_id = Some(page_id);
-                            ret_val.slot_id = Some(slot_id);
-                            match heapfile.write_page_to_file(page)
-                            {
-                                Ok(()) => (),
-                                Err(error) => panic!("insert_value: could not write page to file")
-                            };
-                            break},
-                        None => {
-                            page_id +=1; 
-                        } 
-                    } 
+        else{
+            let idx = ret.unwrap();
+            let length = value.len();
+            let p_ids = heapfiles[*idx].find_pages_to_insert(length);
+            let page_iter = p_ids.iter();
+            for &page_id in page_iter{
+                let mut page;
+                let ret = buffer_pool.get_page(container_id, page_id);
+                if ret.is_none(){
+                    let ret1 = heapfiles[*idx].read_page_from_file(page_id);
+                    match ret1 {
+                        Err(_) => {
+                            panic!("fails to read page from file");
+                        },
+                        Ok(p) => {
+                            buffer_pool.insert_page(&p, container_id);
+                            page = p
+                        }
+
+                    }
                 }
-                Err(e)=> {
-                    panic!("invalid page id");
-                } 
-            } 
-        }
+                else{
+                    let p = ret.unwrap();
+                    page = p;
+                }
+                let add_value = page.add_value(&value);
+                if add_value.is_some() {
+                    let slot_id = add_value.unwrap();
+                    buffer_pool.write_page(&page, container_id);
+                    let write = heapfiles[*idx].write_page_to_file(page);
+                    match write {
+                        Err(e) => panic!("write failed"),
+                        Ok(()) => {
+                            value_id.slot_id = Some(slot_id);
+                            value_id.page_id = Some(page_id as PageId);
+                            return value_id;
+                        }
+                    }
+                }
+            };
 
-        //all existing pages are full
-        if ret_val.slot_id.is_none(){ 
-        let mut page = Page::new(num_pages);
-        let header = page.deserialize_header();
-      //  println!("page is page_id {}, count {}, end_free {}", header.page_id, header.count, header.end_free);
-        match page.add_value(&value) {
-            None => panic!("no sir"),
-            Some(slot_id) => {
-                ret_val.slot_id = Some(slot_id);
-                ret_val.page_id = Some(num_pages);
-                match heapfile.write_page_to_file(page)
-                    {
-                        Err(e) => panic!("can't add value"),
-                        Ok(()) => (),
-                    };
+            let num_pages = heapfiles[*idx].num_pages();
+            let mut page = Page::new(num_pages);
+            let add_value = page.add_value(&value);
+            if add_value.is_some(){
+                let slot_id = add_value.unwrap();
+                buffer_pool.write_page(&page, container_id);
+                let write = heapfiles[*idx].write_page_to_file(page);
+                match write {
+                    Err(e) => panic!("write failed"),
+                    Ok(()) => {
+                        value_id.slot_id = Some(slot_id);
+                        value_id.page_id = Some(num_pages);
+                        return value_id;
+                    }
+                }
+            }
+            else{
+                panic!("add value failed");
             }
         }
     }
-    ret_val
-    }
+
+
 
     /// Insert some bytes into a container for vector of values (e.g. record).
     /// Any validation will be assumed to happen before.
@@ -190,47 +265,34 @@ impl StorageTrait for StorageManager {
         values: Vec<Vec<u8>>,
         tid: TransactionId,
     ) -> Vec<ValueId> {
-        let mut vals = Vec::new();
-        let mut i = 0;
-        while i < values.len() {
-            vals.push(self.insert_value(container_id, values[i].clone(), tid));
-            i+=1;
+        let mut val_ids = Vec::new();
+        for val in values {
+            val_ids.push(self.insert_value(container_id, val, tid));
         }
-        return vals;
+        return val_ids;
     }
 
 
     /// Delete the data for a value. If the valueID is not found it returns Ok() still.
     fn delete_value(&self, id: ValueId, tid: TransactionId) -> Result<(), CrustyError> {
-        if id.page_id.is_none() || id.slot_id.is_none()
-        {
-            return Err(CrustyError::CrustyError(String::from("value not found")))
+        let p_id = id.page_id.unwrap();
+        let ret = self.get_page_helper(id.container_id, p_id);
+        if ret.is_none(){
+            return Ok(())
         }
-        let heapfiles = self.hf_map.write().unwrap().clone();
-        let hf = heapfiles.get(&id.container_id);
-        if hf.is_none(){
-            return Err(CrustyError::CrustyError(String::from("delete value err, couldn't find heap file")));
-        }
-        let res = hf.unwrap();
-        match res.read_page_from_file(id.page_id.unwrap())
-        {
-            Err(error) => Err(CrustyError::CrustyError(String::from("couldn't read"))),
-            Ok(mut page) => {
-                if id.page_id.unwrap() == 0 { 
-                println!("slot id {} is being deleted", id.slot_id.unwrap());
-                }
-                page.delete_value(id.slot_id.unwrap());
-               // println!("new page end_free is {}, open slots is {}", page.deserialize_header().end_free, page.deserialize_header().open_slots);
-                match hf.unwrap().write_page_to_file(page)
-                {
-                    Err(e) => return Err(CrustyError::CrustyError(String::from("couldn't update"))),
-                    Ok(()) => return Ok(())
-                };
-                return Ok(());
+        else {
+            let mut page = ret.unwrap();
+            let slot_id = id.slot_id.unwrap();
+            let page_delete = page.delete_value(slot_id);
+            if page_delete.is_none(){
+                return Err(CrustyError::IOError("couldn't delete".to_string()));
+            }
+            else{
+                return self.write_page_helper(id.container_id, page);
             }
         }
-
     }
+
     /// Updates a value. Returns valueID on update (which may have changed). Error on failure
     /// Any process that needs to determine if a value changed will need to compare the return valueId against
     /// the sent value.
@@ -240,15 +302,15 @@ impl StorageTrait for StorageManager {
         id: ValueId,
         _tid: TransactionId,
     ) -> Result<ValueId, CrustyError> {
-        match self.delete_value(id, _tid)
-        {
-            Ok(()) => {
-                if id.page_id.unwrap() == 0 { 
-                println!("rebound insert value {}", id.slot_id.unwrap());
-                }
-                return Ok(self.insert_value(id.container_id, value, _tid));
+        let delete = self.delete_value(id, _tid);
+        match delete {
+            Ok(_) => {
+                let insert = self.insert_value(id.container_id, value, _tid);
+                return Ok(insert);
             }
-            Err(error) => return Err(error)
+            Err(err) => {
+                return Err(CrustyError::IOError("couldn't update".to_string()));
+            }
         }
     }
 
@@ -270,18 +332,30 @@ impl StorageTrait for StorageManager {
         _container_type: common::ids::StateType,
         _dependencies: Option<Vec<ContainerId>>,
     ) -> Result<(), CrustyError> {
-            let mut hfs = self.hf_map.write().unwrap();
-            let path = &mut self.storage_path.clone();
-            path.push_str(&container_id.to_string());
-            let ret = HeapFile::new(PathBuf::from(path.clone()));
-            match ret{
-                Err(e) => Err(CrustyError::CrustyError(String::from("container could not be created"))),
+        let mut indices = self.indices.write().unwrap();
+        if !indices.contains_key(&container_id) {
+            let mut path = PathBuf::from(&self.s_path);
+            path.push(container_id.to_string());
+            path.set_extension("hf");
+            fs::create_dir_all(self.s_path.clone())?;
+            match HeapFile::new(path) {
                 Ok(hf) => {
-                    hfs.insert(container_id, Arc::new(hf));
+                    let mut hfiles = self.hfs.write().unwrap();
+                    let new = Arc::new(hf);
+                    hfiles.push(new);
+                    indices.insert(container_id, hfiles.len() - 1);
                     return Ok(());
                 }
+                Err(err) => {
+                    return Err(err);
+                }
             }
+        }
+        else {
+            return Ok(());
+        }
     }
+
     /// A wrapper function to call create container
     fn create_table(&self, container_id: ContainerId) -> Result<(), CrustyError> {
         self.create_container(
@@ -296,13 +370,7 @@ impl StorageTrait for StorageManager {
     /// Remove the container and all stored values in the container.
     /// If the container is persisted remove the underlying files
     fn remove_container(&self, container_id: ContainerId) -> Result<(), CrustyError> {
-        let mut hfs = self.hf_map.write().unwrap();
-        let hf = hfs.get(&container_id);
-        if hf.is_none(){
-            return Err(CrustyError::CrustyError(String::from("container not there")))
-        }
-        hfs.remove(&container_id);
-        return Ok(());
+        panic!("to do");
     }
 
 
@@ -314,13 +382,22 @@ impl StorageTrait for StorageManager {
         tid: TransactionId,
         _perm: Permissions,
     ) -> Self::ValIterator {
-        /* Get the heapfile pointer given the provided container_id */
-        let hfs = self.hf_map.read().unwrap();
-        let hf =  hfs.get(&container_id);
-        if hf.is_none(){
-            panic!("container id is invalid");
+        let indices = self.indices.read().unwrap();
+        let heapfiles = self.hfs.write().unwrap();
+        let ret = indices.get(&container_id);
+        if ret.is_none(){
+            panic!("containerId not found in get iterator");
         }
-        HeapFileIterator::new(container_id, tid, hf.unwrap().clone())
+        else {
+            let idx = ret.unwrap();
+            let new  = HeapFileIterator::new(
+                container_id,
+                tid,
+                heapfiles[*idx].clone(),
+                self.bp.clone(),
+            );
+            return new
+        }
     }
 
     /// Get the data for a particular ValueId. Error if does not exists
@@ -330,7 +407,23 @@ impl StorageTrait for StorageManager {
         tid: TransactionId,
         perm: Permissions,
     ) -> Result<Vec<u8>, CrustyError> {
-        panic!("TODO milestone hs");
+        let p_id = id.page_id.unwrap();
+        let p = self.get_page_helper(id.container_id,p_id );
+        if p.is_none(){
+            return Err(CrustyError::CrustyError("invalid valueid".to_string()));
+        }
+        else {
+            let page = p.unwrap();
+            let slot_id = id.slot_id.unwrap();
+            let val = page.get_value(slot_id);
+            if val.is_none(){
+                return Err(CrustyError::CrustyError("valueID not found".to_string()));
+            }
+            else{
+                let ret = val.unwrap();
+                return Ok(ret)
+            }
+        }
     }
 
     /// Notify the storage manager that the transaction is finished so that any held resources can be released.
@@ -340,7 +433,7 @@ impl StorageTrait for StorageManager {
 
     /// Testing utility to reset all state associated the storage manager.
     fn reset(&self) -> Result<(), CrustyError> {
-        panic!("TODO milestone hs");
+        panic!("to do");
     }
 
     /// If there is a buffer pool or cache it should be cleared/reset.
@@ -357,7 +450,7 @@ impl StorageTrait for StorageManager {
     fn shutdown(&self) {
         drop(self);
         if self.is_temp {
-            fs::remove_dir_all(&self.storage_path);
+            fs::remove_dir_all(&self.s_path);
         }  
     }
 
@@ -424,7 +517,9 @@ impl Drop for StorageManager {
     /// Shutdown the storage manager. Can call be called by shutdown. Should be safe to call multiple times.
     /// If temp, this should remove all stored files.
     fn drop(&mut self) {
-        drop(self);
+        if self.is_temp {
+            fs::remove_dir_all(&self.s_path);
+        }
     }
 }
 
