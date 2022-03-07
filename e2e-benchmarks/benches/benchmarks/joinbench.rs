@@ -24,57 +24,57 @@ fn bench_join_tiny(c: &mut Criterion) {
     bt.bench_server(c, "join_tiny");
 }
 
-fn bench_join_small(c: &mut Criterion) {
-    let mut bt = Template::new();
+// fn bench_join_small(c: &mut Criterion) {
+//     let mut bt = Template::new();
 
-    setup_tables(&mut bt, "small_data", "small_data");
-    bt.add_command(Commands::ExecuteSQL(String::from(
-        "select * from testA join testB on testA.a = testB.a",
-    )));
-    bt.show_configuration();
-    bt.bench_server(c, "join_small");
-}
+//     setup_tables(&mut bt, "small_data", "small_data");
+//     bt.add_command(Commands::ExecuteSQL(String::from(
+//         "select * from testA join testB on testA.a = testB.a",
+//     )));
+//     bt.show_configuration();
+//     bt.bench_server(c, "join_small");
+// }
 
-fn bench_join_right(c: &mut Criterion) {
-    let mut bt = Template::new();
+// fn bench_join_right(c: &mut Criterion) {
+//     let mut bt = Template::new();
 
-    setup_tables(&mut bt, "right_data", "left_data");
-    bt.add_command(Commands::ExecuteSQL(String::from(
-        "select * from testA join testB on testA.a = testB.a",
-    )));
-    bt.show_configuration();
-    bt.bench_server(c, "join_right");
-}
+//     setup_tables(&mut bt, "right_data", "left_data");
+//     bt.add_command(Commands::ExecuteSQL(String::from(
+//         "select * from testA join testB on testA.a = testB.a",
+//     )));
+//     bt.show_configuration();
+//     bt.bench_server(c, "join_right");
+// }
 
-fn bench_join_left(c: &mut Criterion) {
-    let mut bt = Template::new();
+// fn bench_join_left(c: &mut Criterion) {
+//     let mut bt = Template::new();
 
-    setup_tables(&mut bt, "right_data", "left_data");
-    bt.add_command(Commands::ExecuteSQL(String::from(
-        "select * from testB join testA on testB.a = testA.a",
-    )));
-    bt.show_configuration();
-    bt.bench_server(c, "join_left");
-}
+//     setup_tables(&mut bt, "right_data", "left_data");
+//     bt.add_command(Commands::ExecuteSQL(String::from(
+//         "select * from testB join testA on testB.a = testA.a",
+//     )));
+//     bt.show_configuration();
+//     bt.bench_server(c, "join_left");
+// }
 
-fn bench_join_large(c: &mut Criterion) {
-    let mut bt = Template::new();
+// fn bench_join_large(c: &mut Criterion) {
+//     let mut bt = Template::new();
 
-    setup_tables(&mut bt, "large_data", "large_data");
-    bt.add_command(Commands::ExecuteSQL(String::from(
-        "select * from testA join testB on testB.a = testA.a",
-    )));
-    bt.show_configuration();
-    bt.bench_server(c, "join_large");
-}
+//     setup_tables(&mut bt, "large_data", "large_data");
+//     bt.add_command(Commands::ExecuteSQL(String::from(
+//         "select * from testA join testB on testB.a = testA.a",
+//     )));
+//     bt.show_configuration();
+//     bt.bench_server(c, "join_large");
+// }
 
 criterion_group! {
     name = joinbench;
     config = Criterion::default().sample_size(10);
     targets =
     bench_join_tiny,
-    bench_join_small,
-    bench_join_right,
-    bench_join_left,
-    bench_join_large,
+    // bench_join_small,
+    // bench_join_right,
+    // bench_join_left,
+    // bench_join_large,
 }

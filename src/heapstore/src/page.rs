@@ -83,6 +83,7 @@ impl Page {
         let mut temp: Vec<u8> = (&entry.slot_id.to_be_bytes()).to_vec();
         let mut addr: Vec<u8> = (&entry.address.to_be_bytes()).to_vec();
         let mut length: Vec<u8> = (&entry.length.to_be_bytes()).to_vec();
+       // println!("slot_id {}, addr {}, length {}", entry.slot_id, entry.address, entry.length);
         temp.append(& mut addr);
         temp.append(& mut length);
         return temp
@@ -183,33 +184,34 @@ impl Page {
     pub fn shift_entries_add(&mut self, entry:Entry) -> Entries{
         let length = entry.length;
         let slot_id = entry.slot_id;
-        // if self.deserialize_header().page_id == 0 { 
-        //     //!("add slot id shifting {}", entry.slot_id);
-        //     }
         let mut vec : Vec<Entry> = Vec::new(); 
         let entries = self.deserialize_entries();
-        for e in entries.entries.iter(){
+        for e in entries.entries.iter().rev(){
             if e.slot_id == slot_id {
-                //updating previous entry with slot id with new length 
                 let new = Entry { slot_id: e.slot_id, length: entry.length, address: e.address};
                 vec.push(new);
             }
             else if e.slot_id > slot_id {
-                // if slot_id to the left of inserted slot, update address and rewrite data with new address 
                 let data = self.retrieve_data(&e).unwrap();
                 let address = e.address - length;
                 let new = Entry { slot_id: e.slot_id, length: e.length, address: address};
-                //writing value to new address
                 self.data[usize::from(address-e.length)..usize::from(address)].clone_from_slice(&data);
                 vec.push(new);
             }
             else{
-                // if slot_id is less than, keep the same 
                 let new = Entry { slot_id: e.slot_id, length: e.length, address: e.address};
                 vec.push(new);
             }
         }
-        let ret = Entries{ entries: vec };
+        for v in vec.iter() {
+            let data = self.retrieve_data(&v).unwrap();
+        }
+        let mut ret_vec = Vec::new();
+        for e in vec.iter().rev(){
+            let temp = Entry { slot_id: e.slot_id, length: e.length, address: e.address};
+            ret_vec.push(temp);
+        }
+        let ret = Entries{ entries: ret_vec};
         self.serialize_entries(&ret);
         return ret;
     }
