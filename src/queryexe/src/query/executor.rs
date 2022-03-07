@@ -253,23 +253,41 @@ impl Executor {
                 if !left_schema.contains(left.column()) {
                     let left_index = Executor::get_field_index(left.column(), right_schema)?;
                     let right_index = Executor::get_field_index(right.column(), left_schema)?;
-                    Ok(Box::new(Join::new(
-                        op.flip(),
-                        left_index,
-                        right_index,
-                        left_child,
-                        right_child,
-                    )))
+                    match op {
+                        SimplePredicateOp::Equals => Ok(Box::new(HashEqJoin::new(
+                            op.clone(),
+                            left_index,
+                            right_index,
+                            left_child,
+                            right_child,
+                        ))),
+                        _ => Ok(Box::new(Join::new(
+                            op.clone(),
+                            left_index,
+                            right_index,
+                            left_child,
+                            right_child,
+                        ))),
+                    }
                 } else {
                     let left_index = Executor::get_field_index(left.column(), left_schema)?;
                     let right_index = Executor::get_field_index(right.column(), right_schema)?;
-                    Ok(Box::new(Join::new(
-                        *op,
-                        left_index,
-                        right_index,
-                        left_child,
-                        right_child,
-                    )))
+                    match op {
+                        SimplePredicateOp::Equals => Ok(Box::new(HashEqJoin::new(
+                            op.clone(),
+                            left_index,
+                            right_index,
+                            left_child,
+                            right_child,
+                        ))),
+                        _ => Ok(Box::new(Join::new(
+                            op.clone(),
+                            left_index,
+                            right_index,
+                            left_child,
+                            right_child,
+                        ))),
+                    }
                 }
             }
             PhysicalOp::HashJoin(PhysicalHashJoinNode {
@@ -284,23 +302,41 @@ impl Executor {
                 if !left_schema.contains(left.column()) {
                     let left_index = Executor::get_field_index(left.column(), right_schema)?;
                     let right_index = Executor::get_field_index(right.column(), left_schema)?;
-                    Ok(Box::new(HashEqJoin::new(
-                        op.flip(),
-                        left_index,
-                        right_index,
-                        left_child,
-                        right_child,
-                    )))
+                    match op {
+                        SimplePredicateOp::Equals => Ok(Box::new(HashEqJoin::new(
+                            *op,
+                            left_index,
+                            right_index,
+                            left_child,
+                            right_child,
+                        ))),
+                        _ => Ok(Box::new(Join::new(
+                            *op,
+                            left_index,
+                            right_index,
+                            left_child,
+                            right_child,
+                        ))),
+                    }
                 } else {
                     let left_index = Executor::get_field_index(left.column(), left_schema)?;
                     let right_index = Executor::get_field_index(right.column(), right_schema)?;
-                    Ok(Box::new(HashEqJoin::new(
-                        *op,
-                        left_index,
-                        right_index,
-                        left_child,
-                        right_child,
-                    )))
+                    match op {
+                        SimplePredicateOp::Equals => Ok(Box::new(HashEqJoin::new(
+                            *op,
+                            left_index,
+                            right_index,
+                            left_child,
+                            right_child,
+                        ))),
+                        _ => Ok(Box::new(Join::new(
+                            *op,
+                            left_index,
+                            right_index,
+                            left_child,
+                            right_child,
+                        ))),
+                    }
                 }
             }
             PhysicalOp::Filter(PhysicalFilterNode { predicate, .. }) => {
