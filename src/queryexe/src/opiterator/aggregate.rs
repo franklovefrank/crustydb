@@ -263,6 +263,9 @@ impl OpIterator for Aggregate {
     }
 
     fn close(&mut self) -> Result<(), CrustyError> {
+        if self.open == false{
+            panic!("it's not open anyway");
+        }
         self.open = false;
         let res = self.t_iterator.close();
         match res {

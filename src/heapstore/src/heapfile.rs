@@ -24,7 +24,7 @@ pub(crate) struct HeapFile {
     pub read_count: AtomicU16,
     pub write_count: AtomicU16,
     empty_space: Arc<RwLock<Vec<usize>>>, 
-    f_lock: Arc<RwLock<File>>,
+    f_lock: Arc<RwLock<File>>, 
 }
 
 /// HeapFile required functions
@@ -110,47 +110,34 @@ impl HeapFile {
         }
         let page_num: usize = self.num_pages().into();
         let mut file = self.f_lock.write().unwrap();
-
-        let p_id = page.get_page_id();
-        if p_id as usize >= page_num {
-            let seek  = file.seek(SeekFrom::End(0));
-            match seek {
+        if page.get_page_id() as usize >= page_num {
+            file.seek(SeekFrom::End(0))?;
+            match file.write(&page.get_bytes()) {
                 Ok(_) => {
-                    match file.write(&page.get_bytes()) {
-                        Ok(_) => {
-                            let free = page.get_largest_free_contiguous_space();
-                            let mut empty_space = self.empty_space.write().unwrap();
-                            empty_space.push(free);
-                            return Ok(());
-                        }
-                        Err(e) => return Err(CrustyError::IOError("write error".to_string())) 
-                    }
+                    let mut empty_space = self.empty_space.write().unwrap();
+                    empty_space.push(page.get_largest_free_contiguous_space());
+                    return Ok(());
                 }
-                Err(e) =>  return Err(CrustyError::IOError("seek error".to_string()))
+                Err(why) => {
+                    return Err(CrustyError::IOError(why.to_string()));
+                }
             }
         }
 
-       let seek = file.seek(SeekFrom::Start(
-            (PAGE_SIZE * p_id as usize).try_into().unwrap(),
+        file.seek(SeekFrom::Start(
+            (4096 * page.get_page_id() as usize).try_into().unwrap(),
         ));
-        match seek {
-            Err(e) => return Err(CrustyError::IOError("seek error".to_string())),
+        match file.write(&page.get_bytes()) {
             Ok(_) => {
-                match file.write(&page.get_bytes()) {
-                    Err(e) => {
-                        return Err(CrustyError::IOError("write error".to_string()));
-                    },
-                    Ok(_) => {
-                        let mut empty_space = self.empty_space.write().unwrap();
-                        empty_space[p_id as usize] = page.get_largest_free_contiguous_space();
-                        return Ok(());
-                    }
-                }
+                let mut empty_space = self.empty_space.write().unwrap();
+                empty_space[page.get_page_id() as usize] = page.get_largest_free_contiguous_space();
+                return Ok(());
+            }
+            Err(why) => {
+                return Err(CrustyError::IOError(why.to_string()));
             }
         }
     }
-
-
 }
 
 #[cfg(test)]
@@ -182,7 +169,6 @@ mod test {
         let bytes = get_random_byte_vec(100);
         p0.add_value(&bytes);
         let p0_bytes = p0.get_bytes();
-        println!("before write");
         hf.write_page_to_file(p0);
         //check the page
         assert_eq!(1, hf.num_pages());

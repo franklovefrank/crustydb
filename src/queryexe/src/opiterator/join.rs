@@ -143,6 +143,9 @@ impl OpIterator for Join {
     }
 
     fn close(&mut self) -> Result<(), CrustyError> {
+        if self.open == false{
+            panic!("it's already closed")
+        }
         self.open = false;
         let right = self.right.close();
         match right {

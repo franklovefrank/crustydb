@@ -112,9 +112,8 @@ impl BufferPool {
 
     //evicts random page from pool and returns index
     pub(crate) fn evict(&mut self) -> usize {
-        if self.next_frame == 50 {
-            panic!("no need to call evict sweetheart")
-        }
+        assert_eq!(self.next_frame, 50);
+
         let mut i = 0; 
         while i < 50 {
             if self.frames[i].dirty {
@@ -131,5 +130,13 @@ impl BufferPool {
             }
         }
         return i
+    }
+
+    pub(crate) fn reset(&mut self) {
+        for i in 0..50 {
+            self.frames[i] = Frame::new(None);
+        }
+        self.indices.clear();
+        self.next_frame = 0;
     }
 }

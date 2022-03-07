@@ -265,17 +265,7 @@ impl Page {
             let start_i = usize::from(new_entry.address) - usize::from(length); 
             let end_i = usize::from(new_entry.address);
             self.data[start_i..end_i].clone_from_slice(&bytes);
-            let entries2 = self.deserialize_entries();
-            if header.page_id == 0 {
-             //   println!("adding entry slot_id {}, length {}", new_entry.slot_id, new_entry.length);
-            }
-        //     if header.page_id == 0{ 
-        //     for e in entries2.entries.iter(){
-        //         println!("after insert,  entries are slot id {} length {} address {} ", e.slot_id, e.length, e.address);
-        //     }
-        
-        //     println!("done");
-        // }
+
             Some(new_entry.slot_id)
         }
     }
@@ -324,9 +314,6 @@ impl Page {
         }
         let entry = self.deserialize_entry(slot_id);
         let e = entry.unwrap();
-        // if self.deserialize_header().page_id == 0 { 
-        // println!("deleting entry slot_id {}, length {}", e.slot_id, e.length);
-        // };
         self.shift_entries_del(e); 
         //updating header count and reserialize
         let mut header = self.deserialize_header();
@@ -334,13 +321,6 @@ impl Page {
         self.serialize_header(&header);
         let entries = self.deserialize_entries();
         let page_id = header.page_id;
-        // if page_id == 0 { 
-        //     for e in entries.entries.iter(){
-        //         println!("after del, entries are slot id {} length {} address {} ", e.slot_id, e.length, e.address);
-        //     }
-        //     println!("done");
-        // }
-
         Some(())
     }
 
@@ -879,7 +859,7 @@ mod tests {
 
         //Delete
         let mut p = Page::from_bytes(&page_bytes);
-        println!("delete value 2");
+       // println!("delete value 2");
         p.delete_value(2);
         let mut iter = p.into_iter();
         assert_eq!(Some(tuple_bytes.clone()), iter.next());

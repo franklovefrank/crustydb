@@ -18,7 +18,7 @@ fn sm_inserts() {
         let vals1 = get_random_vec_of_byte_vec(i, 50, 100);
         let cid = i as ContainerId;
         sm.create_table(cid).unwrap();
-        println!("table with id {} created",i);
+        //println!("table with id {} created",i);
         sm.insert_values(cid, vals1.clone(), t);
         let check_vals: Vec<Vec<u8>> = sm.get_iterator(cid, t, RO).collect();
         assert!(
@@ -28,6 +28,8 @@ fn sm_inserts() {
         );
     }
 }
+
+
 
 #[test]
 fn sm_insert_delete() {
@@ -54,21 +56,32 @@ fn sm_insert_updates() {
     let mut rng = thread_rng();
     let sm = StorageManager::new_test_sm();
     let t = TransactionId::new();
+    // vals1 -> array of values 
     let mut vals1 = get_random_vec_of_byte_vec(100, 50, 100);
     let cid = 1;
     sm.create_table(cid).unwrap();
+    // insert vals1 into container 
     let mut val_ids = sm.insert_values(cid, vals1.clone(), t);
+    let mut i = 0;
     for _ in 0..10 {
         let idx_to_upd = rng.gen_range(0..vals1.len());
         let new_bytes = get_random_byte_vec(15);
+        // insert new_Bytes, new_val_id
         let new_val_id = sm
             .update_value(new_bytes.clone(), val_ids[idx_to_upd], t)
             .unwrap();
+        // check_vals is values after insertion of new_bytes 
         let check_vals: Vec<Vec<u8>> = sm.get_iterator(cid, t, RO).collect();
+        // this is passing. i.e. original array of values != values after insertion 
         assert!(!compare_unordered_byte_vecs(&vals1, check_vals.clone()));
+        // this is manually doing what update_value should be doing, replacing value with new_bytes in array
         vals1[idx_to_upd] = new_bytes;
+        // updating val_id 
         val_ids[idx_to_upd] = new_val_id;
+        // this is where it's failing. so inserting at wrong spot 
+        //println!("vals are {:?}, check_vals is {:?}, index is {}", vals1[idx_to_upd], check_vals, idx_to_upd);
         assert!(compare_unordered_byte_vecs(&vals1, check_vals));
+        i+=1;
     }
 }
 
