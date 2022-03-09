@@ -1,0 +1,41 @@
+
+My implementation already had some performance minded features in mind, like using an empty space lock in the heapfile.
+I added a buffer pool implementation that I used in the storage manager 
+My buffer pool struct looks like this
+
+pub(crate) struct BufferPool {
+    pub indices: HashMap<(ContainerId, PageId), usize>,
+    next_frame: usize,
+    pub frames: Vec<Frame>,
+}
+
+and the frame struct is this 
+
+pub struct Frame {
+    pub dirty: bool,
+    pub c_id: Option<ContainerId>,
+    pub page: Option<Page>,
+    pub p_id: Option<PageId>,
+}
+
+ I copied the page struct into the frame to keep things simple. 
+ The vector of frames is storage, and the hashmap matches container_id and 
+ page_id tuple to the index in the buffer pool to avoid confusion with pages where page_id
+ is the same but container_id is different. I wasted a lot of time trying to find a different way
+ to index it because I was being silly and didn't realize you could use a tuple as a key :(
+The next frame field just keeps track of the index of the next empty frame in the bp to make add_page quick and easy. 
+Other functions just to manage the buffer pool, e.g. handling cases when its full 
+
+The other thing I did was change EqJoin to Hash Join, since all the bench tests 
+are eq join and hash join is way quicker (I think O(m+n) vs O(mn)?)
+
+
+The buffer pool took a minute since I kinda free balled it, maybe 8 hours. Changing 
+eq join just took a second. I'm glad I tried to do the buffer pool because I didn't 
+really understand how it worked before. I wish this milestone would have had a little
+bit more guidance though, because I like being told what to do 
+
+For everything small join and bigger, my implementation is /way/ faster 
+than the baseline (1/10th). tiny join is slow, so I assume I have some overhead costs somewhere
+that could be optimized. Poked around a bit though and wasn't sure, probably would have required
+some hand holding for me to figure it out 

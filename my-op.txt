@@ -1,0 +1,91 @@
+-- join 
+
+hi what's up, here are my structs for join
+
+
+pub struct JoinPredicate {
+    /// Operation to comapre the fields with.
+    op: SimplePredicateOp,
+    /// Index of the field of the left table (tuple).
+    left_index: usize,
+    /// Index of the field of the right table (tuple).
+    right_index: usize,
+    curr_left_tuple: Option<Tuple>
+}
+
+I used the curr_left_tuple variable to make it easier in the next() function
+since I can just iterate through the right child and compare it to left_tuple, and then
+update when the right child iteration terminates 
+
+pub struct Join {
+    /// Join condition.
+    predicate: JoinPredicate,
+    /// Left child node.
+    left: Box<dyn OpIterator>,
+    /// Right child node.
+    right: Box<dyn OpIterator>,
+    /// Schema of the result.
+    schema: TableSchema,
+    open: bool,
+    first: bool
+}
+
+the open boolean was very helpful for managing things. I initially set it to true.
+In next(), I know if first is set to true, i need to call self.left.next() twice before
+changing first to false 
+
+
+pub struct HashEqJoin {
+    left: Box<dyn OpIterator>,
+    right: Box<dyn OpIterator>,
+
+    schema: TableSchema,
+    hash_table: HashMap<Field, (Vec<Tuple>, usize)>, //vector of tuples
+    /// Boolean determining if iterator is open.
+    open: bool,
+    right_index: usize,
+    left_index: usize
+}
+
+yeehaw. Hash table inside the struct doing most of the dirty work here. 
+The key for the hash table is the left child field thats being joined on, 
+the value is (vec<tuple>, usize) tuple that tracks the current index in the vector.
+In next(), I iterate through the right child and the hash field i'm joining on. Then merge
+the tuple at appropraite index and update index if neccessary
+
+
+-- aggregate 
+pub struct AggregateField {
+    /// Index of field being aggregated.
+    pub field: usize,
+    /// Agregate operation to aggregate the column with.
+    pub op: AggOp,
+}
+
+struct Aggregator {
+    /// Aggregated fields.
+    agg_fields: Vec<AggregateField>,
+    /// Group by fields
+    groupby_fields: Vec<usize>,
+    /// Schema of the output.
+    schema: TableSchema,
+    ht: HashMap<Vec<Field>, Vec<Vec<Field>>>,
+}
+
+pub struct Aggregate {
+     /// Resulting schema.
+    schema: TableSchema,
+    /// Boolean if the iterator is open.
+    open: bool,
+    /// Tuple iterator
+    t_iterator: TupleIterator,
+}
+
+
+In the aggregator stuct, i use a hashmap where a vector of the groupby fields
+is the key and the value is a vec of vec of aggregate fields. I use the aggregators 
+iterator function in the aggregate struct so I can just call next() of the tuple iterator
+in the aggregate implementation 
+
+This one clicked with me and was the only part of crusty i didn't find unbearably tedious. 
+Probably took me 6 hours. I liked that it was more open ended, don't really have any complaints :) 

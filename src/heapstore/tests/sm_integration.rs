@@ -18,7 +18,6 @@ fn sm_inserts() {
         let vals1 = get_random_vec_of_byte_vec(i, 50, 100);
         let cid = i as ContainerId;
         sm.create_table(cid).unwrap();
-        //println!("table with id {} created",i);
         sm.insert_values(cid, vals1.clone(), t);
         let check_vals: Vec<Vec<u8>> = sm.get_iterator(cid, t, RO).collect();
         assert!(
@@ -78,8 +77,6 @@ fn sm_insert_updates() {
         vals1[idx_to_upd] = new_bytes;
         // updating val_id 
         val_ids[idx_to_upd] = new_val_id;
-        // this is where it's failing. so inserting at wrong spot 
-        //println!("vals are {:?}, check_vals is {:?}, index is {}", vals1[idx_to_upd], check_vals, idx_to_upd);
         assert!(compare_unordered_byte_vecs(&vals1, check_vals));
         i+=1;
     }

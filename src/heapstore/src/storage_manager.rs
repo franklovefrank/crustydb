@@ -13,9 +13,6 @@ use std::path::{PathBuf, Path};
 use std::sync::{Arc, RwLock};
 use std::fs::File;
 
-
-
-
 pub struct Heap {
     pub container_id: ContainerId,
     pub num_pages: PageId,
@@ -38,12 +35,9 @@ pub fn deserialize_heap(heap: Vec<u8>) -> Heap {
     dst.clone_from_slice(&heap[..2]);
     dst1.clone_from_slice(&heap[2..4]);
     let container_id = u16::from_be_bytes(dst);
-   // let num_pages = (heap.len() - 4) / 4096;
     let num_pages = u16::from_be_bytes(dst1);
     let mut pages: Vec<Vec<u8>> = Vec::new();
     let mut i: usize = 0;
-   // println!("num pages is {}", num_pages);
-    //println!("heap is len {}", heap.len());
     while i < usize::from(num_pages){
         let mut dst2 = [0; PAGE_SIZE];
         let si = usize::from((i*PAGE_SIZE)+4);
@@ -159,7 +153,6 @@ impl StorageTrait for StorageManager {
             match paths {
                 Ok(ps) => { 
                     for path in ps {
-                        //println!(" path is {:?}", path.unwrap().path().file_name());
                         let f = File::open(path.unwrap().path());
                         match f {
                             Ok(f) => {
@@ -170,7 +163,6 @@ impl StorageTrait for StorageManager {
                                     Err(e) => panic!("could not read into buffer")  
                                 }
                                 let heap = deserialize_heap(buffer);
-                               // println!("container_id: {}, num_pages: {}, len pages {}", heap.container_id, heap.num_pages, heap.pages.len());
                                 let mut hf_path = storage_path.clone();
                                 hf_path.push_str(&heap.container_id.to_string());
                                 let new_hf = HeapFile::new(PathBuf::from(hf_path.clone())).unwrap();
@@ -179,7 +171,6 @@ impl StorageTrait for StorageManager {
                                     new_hf.write_page_to_file(page);
                                 }
                                 hf_map.insert(heap.container_id, Arc::new(new_hf));
-                               // println!("hf map len {}", hf_map.len());
                             }
                             Err(e) => panic!("can't open file")
                         }
@@ -245,7 +236,6 @@ impl StorageTrait for StorageManager {
                         hf.write_page_to_file(page);
                         v_id.page_id = Some(page_id as PageId);
                         v_id.slot_id = Some(slot_id);
-                        //println!("returning v with page_id {}, slot_id {}",v_id.page_id.unwrap(), v_id.slot_id.unwrap());
                         return v_id;
 
                     }
@@ -259,7 +249,6 @@ impl StorageTrait for StorageManager {
                     hf.write_page_to_file(page);
                     v_id.page_id = Some(num_pages);
                     v_id.slot_id = Some(slot_id);
-                    //println!("returning v with page_id {}, slot_id {}",v_id.page_id.unwrap(), v_id.slot_id.unwrap());
                     return v_id;
                 }
                 else {
@@ -306,30 +295,6 @@ impl StorageTrait for StorageManager {
             }
         }
     }
-    /// Delete the data for a value. If the valueID is not found it returns Ok() still.
-    // fn delete_value(&self, id: ValueId, tid: TransactionId) -> Result<(), CrustyError> {
-    //     if id.page_id.is_none() || id.slot_id.is_none()
-    //     {
-    //         return Err(CrustyError::CrustyError(String::from("value not found")))
-    //     }
-    //     let heapfiles = self.hf_map.write().unwrap().clone();
-    //     let hf = heapfiles.get(&id.container_id);
-    //     if hf.is_none(){
-    //         return Err(CrustyError::CrustyError(String::from("delete value err, couldn't find heap file")));
-    //     }
-    //     let res = hf.unwrap();
-    //     match res.read_page_from_file(id.page_id.unwrap())
-    //     {
-    //         Err(error) => Err(CrustyError::CrustyError(String::from("couldn't read"))),
-    //         Ok(mut page) => {
-    //             match page.delete_value(id.slot_id.unwrap()){
-    //                 None => return Ok(()),
-    //                 Some(()) => return Ok(())
-
-    //             }
-    //         }
-    //     }
-    // }
 
     /// Updates a value. Returns valueID on update (which may have changed). Error on failure
     /// Any process that needs to determine if a value changed will need to compare the return valueId against
@@ -342,11 +307,9 @@ impl StorageTrait for StorageManager {
     ) -> Result<ValueId, CrustyError> {
         match self.delete_value(id, _tid) {
             Ok(_) => {
-                //println!("deleted ok");
                 return Ok(self.insert_value(id.container_id, value, _tid));
             }
             Err(err) => {
-               // println!("error deleting");
                 return Err(err);
             }
         }
@@ -373,7 +336,6 @@ impl StorageTrait for StorageManager {
             let mut hfs = self.hf_map.write().unwrap();
             let path = &mut self.storage_path.clone();
             path.push_str(&container_id.to_string());
-           // println!("storage path after create is {:?}", self.storage_path);
             let ret = HeapFile::new(PathBuf::from(path.clone()));
             match ret{
                 Err(e) => Err(CrustyError::CrustyError(String::from("container could not be created"))),
@@ -496,7 +458,6 @@ impl StorageTrait for StorageManager {
                 }
                 let temp = Heap{ container_id:container_id, num_pages: num_pages, pages: page_vec};
                 let serialized = serialize_heap(&temp);
-                //let mut hf_path = dir_path.push(&container_id.to_string());
                 let mut path = PathBuf::from(&self.storage_path);
                 path.push(&container_id.to_string());
                 let mut file = match OpenOptions::new()

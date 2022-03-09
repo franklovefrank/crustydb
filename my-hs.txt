@@ -1,0 +1,28 @@
+ 
+ -- heapfile --
+My heapfile struct includes a file and vector of empty space, both with a RW lock. 
+The heapfile is stored as a file struct and protected by a RW lock. My empty space 
+lock is a vector that tracks empty space on each page so I don't have to iterate 
+through all the pages in the file to insert a value. To compute the number of 
+pages, I read the metadata of the file and then divide its length by the size of 
+a page. To find pages to insert, I iterate through the empty space lock and return 
+the first page with sufficient free contiguous space. 
+
+-- heapfile iter -- 
+my heapfile iterator implementation was pretty run of the mill. i based it on my page iterator
+and things i found online 
+
+-- storage manager -- 
+for the storage manager, i stored the storage_path as a string, the heapfiles as a hash map where the key was the container id and the 
+value was an Arc<Heapfile>. I also used a buffer pool. Using the hashmap allowed me to easily link the files with their container ids. To (de)serialize the heapfiles 
+on start up/shutdown, I iterated through my heapfile hashmap and created a struct for each heapfile that contained its container_id, number_of_pages (unnecessary but made calculations easier) and its pages as a vector of bytes
+I used the same methods of serialization I used in the page milestone. The most complicated function was the insert value fucntion. My implementation finds the heapfile struct and finds the first empty slot using the empty_space lock. Then I check if it the page is in the buffer pool using the page id and updating accordingly 
+
+
+I spent a long dang time on this. 30 hours at least. I wish I would have taken the time to learn how to debug properly. 
+Serializing/deserializing was kind of a pain. I really wanted to just store the container id in the heapfile itself but
+thats not how things work. I thought the design of the storage manager and how it interacted with heapfile/page was pretty
+neat though and fun to implement 
+
+Since I'm resubmitting, I implemented the shutdown/reset functions and fixed the insert_updates. the first two I just didn't do,
+the second wasn't working because of an issue with my page implementation. I don't know why the hidden tests aren't passing
