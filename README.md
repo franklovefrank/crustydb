@@ -1,8 +1,6 @@
 # CrustyDB
 
-CrustyDB is an academic Rust-based relational database management system built
-by ChiData at The University of Chicago. You should read this document fully and look at the CrustyDB.pdf.
-
+CrustyDB is a Rust-based relational database management system I built for an assigment for a Databases class at University of Chicago.
 
 ## Usage
 
